@@ -181,3 +181,23 @@
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.stop-button {
+  background: transparent;
+  border: none;
+  border-radius: 14px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #dc2626;
+  font-size: 20px;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.stop-button:hover {
+  background: rgba(220, 38, 38, 0.12);
+  transform: translateY(-1px);
+}

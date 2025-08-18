@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addBookmark: (url, title) => ipcRenderer.invoke('add-bookmark', url, title),
   getBookmarks: () => ipcRenderer.invoke('get-bookmarks'),
   removeBookmark: (url) => ipcRenderer.invoke('remove-bookmark', url),
+  exportBookmarks: () => ipcRenderer.invoke('export-bookmarks'),
+  importBookmarksFromPath: (filePath) => ipcRenderer.invoke('import-bookmarks', filePath),
+  importBookmarksData: (bookmarksArray) => ipcRenderer.invoke('import-bookmarks-data', bookmarksArray),
 
   // History
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -52,4 +55,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeNavigationListener: (callback) => ipcRenderer.removeListener('navigation-changed', callback),
   removeLoadingStateListener: (callback) => ipcRenderer.removeListener('loading-state-changed', callback),
   removeLoadErrorListener: (callback) => ipcRenderer.removeListener('load-error', callback),
+
+  // Gestures
+  onSwipeGesture: (callback) => ipcRenderer.on('gesture-swipe', (_e, data) => callback(_e, data)),
+  removeSwipeGestureListener: (callback) => ipcRenderer.removeListener('gesture-swipe', callback),
 });

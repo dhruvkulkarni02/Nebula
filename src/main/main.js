@@ -141,6 +141,15 @@ function createWindow() {
       console.warn('Failed to update BrowserView bounds on resize:', e);
     }
   });
+
+  // macOS: two-finger swipe gestures for back/forward
+  mainWindow.on('swipe', (event, direction) => {
+    try {
+      mainWindow.webContents.send('gesture-swipe', { direction });
+    } catch (e) {
+      console.warn('Failed to propagate swipe gesture:', e);
+    }
+  });
 }
 
 function configureSessionSecurity() {
@@ -621,15 +630,60 @@ function setupIpcHandlers() {
     }
   });
 
-  // Settings handlers (placeholder implementations)
+  // Settings storage (Phase 2: preferences groundwork)
+  const getSettingsPath = () => {
+    const userDataPath = app.getPath('userData');
+    return path.join(userDataPath, 'settings.json');
+  };
+
+  const loadSettings = () => {
+    try {
+      const p = getSettingsPath();
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('Failed to load settings:', e);
+    }
+    return {};
+  };
+
+  const saveSettings = (settings) => {
+    try {
+      const p = getSettingsPath();
+      const dir = path.dirname(p);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(settings, null, 2));
+      return true;
+    } catch (e) {
+      console.warn('Failed to save settings:', e);
+      return false;
+    }
+  };
+
+  ipcMain.handle('get-settings', async () => {
+    console.log('Get settings request');
+    return loadSettings();
+  });
+
+  ipcMain.handle('update-settings', async (event, partial) => {
+    console.log('Update settings request:', partial);
+    const current = loadSettings();
+    const updated = { ...current, ...(partial || {}) };
+    const ok = saveSettings(updated);
+    return { success: ok, settings: updated };
+  });
+
+  // Back-compat simple handlers
   ipcMain.handle('get-setting', async (event, key) => {
-    console.log('Get setting request:', key);
-    return { value: null };
+    const s = loadSettings();
+    return { value: s[key] };
   });
 
   ipcMain.handle('set-setting', async (event, key, value) => {
-    console.log('Set setting request:', key, value);
-    return { success: true };
+    const s = loadSettings();
+    s[key] = value;
+    return { success: saveSettings(s) };
   });
 
   // Privacy handlers (placeholder implementations)
@@ -646,6 +700,66 @@ function setupIpcHandlers() {
   ipcMain.handle('clear-browsing-data', async (event, options) => {
     console.log('Clear browsing data request:', options);
     return { success: true };
+  });
+
+  // Bookmarks import/export (Phase 2: organization groundwork)
+  ipcMain.handle('export-bookmarks', async () => {
+    try {
+      const bookmarks = loadBookmarks();
+      const userDataPath = app.getPath('userData');
+      const exportDir = path.join(userDataPath, 'exports');
+      if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const exportPath = path.join(exportDir, `bookmarks-${ts}.json`);
+      fs.writeFileSync(exportPath, JSON.stringify(bookmarks, null, 2));
+      shell.showItemInFolder(exportPath);
+      return { success: true, path: exportPath };
+    } catch (e) {
+      console.error('Export bookmarks failed:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('import-bookmarks', async (event, filePath) => {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return { success: false, error: 'File not found' };
+      }
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (!Array.isArray(data)) {
+        return { success: false, error: 'Invalid bookmarks format' };
+      }
+      const existing = loadBookmarks();
+      const map = new Map(existing.map(b => [b.url, b]));
+      for (const b of data) {
+        if (b && b.url) map.set(b.url, { url: b.url, title: b.title || b.url, dateAdded: b.dateAdded || new Date().toISOString() });
+      }
+      const merged = Array.from(map.values());
+      saveBookmarks(merged);
+      return { success: true, count: merged.length };
+    } catch (e) {
+      console.error('Import bookmarks failed:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('import-bookmarks-data', async (event, bookmarksArray) => {
+    try {
+      if (!Array.isArray(bookmarksArray)) {
+        return { success: false, error: 'Invalid bookmarks array' };
+      }
+      const existing = loadBookmarks();
+      const map = new Map(existing.map(b => [b.url, b]));
+      for (const b of bookmarksArray) {
+        if (b && b.url) map.set(b.url, { url: b.url, title: b.title || b.url, dateAdded: b.dateAdded || new Date().toISOString() });
+      }
+      const merged = Array.from(map.values());
+      saveBookmarks(merged);
+      return { success: true, count: merged.length };
+    } catch (e) {
+      console.error('Import bookmarks data failed:', e);
+      return { success: false, error: e.message };
+    }
   });
 }
 

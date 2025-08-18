@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
 import '../styles/WebView.css';
 
-const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
+const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable }) => {
   const webviewRef = useRef(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
@@ -15,6 +15,52 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
       onOpenFind(() => setShowFind(true));
     }
   }, [onOpenFind]);
+
+  useEffect(() => {
+    if (onStopAvailable) {
+      onStopAvailable(() => {
+        const webview = webviewRef.current;
+        if (webview && webview.stop) webview.stop();
+      });
+    }
+  }, [onStopAvailable]);
+
+  useEffect(() => {
+    if (onZoomAvailable) {
+      onZoomAvailable({
+        zoomIn: () => {
+          const webview = webviewRef.current;
+          if (!webview) return;
+          const current = webview.getZoomFactor();
+          webview.setZoomFactor(Math.min(current + 0.1, 3));
+        },
+        zoomOut: () => {
+          const webview = webviewRef.current;
+          if (!webview) return;
+          const current = webview.getZoomFactor();
+          webview.setZoomFactor(Math.max(current - 0.1, 0.25));
+        },
+        resetZoom: () => {
+          const webview = webviewRef.current;
+          if (!webview) return;
+          webview.setZoomFactor(1);
+        }
+      });
+    }
+  }, [onZoomAvailable]);
+
+  useEffect(() => {
+    if (onAudioAvailable) {
+      onAudioAvailable({
+        toggleMute: () => {
+          const webview = webviewRef.current;
+          if (!webview) return;
+          const muted = webview.isAudioMuted();
+          webview.setAudioMuted(!muted);
+        }
+      });
+    }
+  }, [onAudioAvailable]);
 
   useEffect(() => {
     // Only set up event listeners if we have a valid URL and webview element
@@ -90,6 +136,12 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
       // Don't set URL here - it's already set via the src attribute
     };
 
+    const handleFaviconUpdated = (event) => {
+      if (onFaviconChange) {
+        onFaviconChange(event.favicons || []);
+      }
+    };
+
     // Add event listeners
     webview.addEventListener('dom-ready', handleDomReady);
     webview.addEventListener('did-start-loading', handleLoadStart);
@@ -99,6 +151,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
     webview.addEventListener('page-title-updated', handlePageTitle);
     webview.addEventListener('did-navigate', handleNavigation);
     webview.addEventListener('did-navigate-in-page', handleNavigation);
+    webview.addEventListener('page-favicon-updated', handleFaviconUpdated);
 
     // Security: Add console message handler for debugging
     webview.addEventListener('console-message', (e) => {
@@ -129,8 +182,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
       webview.removeEventListener('page-title-updated', handlePageTitle);
       webview.removeEventListener('did-navigate', handleNavigation);
       webview.removeEventListener('did-navigate-in-page', handleNavigation);
+      webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
     };
-  }, [url, onUrlChange]);
+  }, [url, onUrlChange, onFaviconChange]);
 
   if (hasError) {
     return (
@@ -158,16 +212,16 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind }) => {
       
       {!url || url === 'about:blank' ? (
         <div className="start-page">
-          <h1>�️ NebulaBrowser</h1>
+          <h1>🌤️ NebulaBrowser</h1>
           <p>Simple, private, and fast. Your browsing starts here.</p>
           <p>Tip: Cmd/Ctrl+L to focus the address bar, Cmd/Ctrl+T to open a new tab.</p>
           <div className="quick-actions">
             <button className="quick-action" onClick={() => onNavigate && onNavigate('https://duckduckgo.com')}>🦆 DuckDuckGo</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://google.com')}>� Google</button>
+            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://google.com')}>🔍 Google</button>
             <button className="quick-action" onClick={() => onNavigate && onNavigate('https://github.com')}>💻 GitHub</button>
             <button className="quick-action" onClick={() => onNavigate && onNavigate('https://wikipedia.org')}>📚 Wikipedia</button>
             <button className="quick-action" onClick={() => onNavigate && onNavigate('https://youtube.com')}>📺 YouTube</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://news.ycombinator.com')}>� Hacker News</button>
+            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://news.ycombinator.com')}>📰 Hacker News</button>
           </div>
         </div>
       ) : (

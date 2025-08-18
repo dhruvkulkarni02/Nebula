@@ -10,6 +10,7 @@ const NavigationBar = ({
   onGoBack,
   onGoForward,
   onReload,
+  onStop,
   onShowBookmarks,
   onShowHistory,
   onOpenFind,
@@ -41,6 +42,24 @@ const NavigationBar = ({
     window.addEventListener('focus-address-bar', focusHandler);
     return () => window.removeEventListener('focus-address-bar', focusHandler);
   }, []);
+
+  // Listen for swipe gestures sent from main (macOS trackpad two-finger swipe)
+  useEffect(() => {
+    const swipeHandler = (_e, data) => {
+      if (!data || !data.direction) return;
+      if (data.direction === 'left') {
+        // Swipe left = go forward (like Safari)
+        onGoForward && onGoForward();
+      } else if (data.direction === 'right') {
+        // Swipe right = go back
+        onGoBack && onGoBack();
+      }
+    };
+    window.electronAPI?.onSwipeGesture(swipeHandler);
+    return () => {
+      window.electronAPI?.removeSwipeGestureListener(swipeHandler);
+    };
+  }, [onGoBack, onGoForward]);
 
   const checkIfBookmarked = async (url) => {
     try {
@@ -118,14 +137,23 @@ const NavigationBar = ({
       ➡️
         </button>
         
-        <button
-      className="reload-button"
-          onClick={onReload}
-          disabled={isLoading}
-          title="Reload"
-        >
-      {isLoading ? '⏳' : '🔄'}
-        </button>
+        {isLoading ? (
+          <button
+            className="stop-button"
+            onClick={onStop}
+            title="Stop loading"
+          >
+            ⛔
+          </button>
+        ) : (
+          <button
+            className="reload-button"
+            onClick={onReload}
+            title="Reload"
+          >
+            🔄
+          </button>
+        )}
         
         <button
           className="nav-button"
