@@ -1,5 +1,5 @@
 .browser-interface {
-  height: 100%;
+  height: 100vh; /* ensure full window height even if parent isn't sized */
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -207,46 +207,36 @@
 }
 
 .new-tab-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  background: #3b82f6;
+  border: 1px solid #2563eb;
+  border-radius: 10px;
   width: 32px;
   height: 32px;
   cursor: pointer;
   font-size: 18px;
-  font-weight: 300;
-  color: #f0f6fc;
+  font-weight: 600;
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-left: 8px;
   transition: all 0.2s ease;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
 }
-
 .new-tab-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background: #2563eb;
+  border-color: #1d4ed8;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.45);
 }
 
+/* Main content area wrapper (WebView lives inside) */
 .content-area {
   flex: 1;
-  overflow: hidden;
-  background: #0d1117;
-  border-radius: 0 0 8px 8px;
+  min-height: 0; /* allow flex child to shrink and enable proper overflow */
+  display: flex;
   position: relative;
+  overflow: hidden;
+  background: #ffffff;
 }
 
-/* Pinned tabs are compact */
-.tab.pinned {
-  min-width: 48px;
-  max-width: 100px;
-  padding: 8px 12px;
-}
-
-.tab.pinned .tab-title {
-  max-width: 60px;
-}

@@ -4,6 +4,7 @@ import WebView from './WebView';
 import BookmarksPanel from './BookmarksPanel';
 import HistoryPanel from './HistoryPanel';
 import DownloadsManager from './DownloadsManager';
+import SettingsPanel from './SettingsPanel';
 import '../styles/BrowserInterface.css';
 
 const BrowserInterface = ({
@@ -24,7 +25,9 @@ const BrowserInterface = ({
   const [showHistory, setShowHistory] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const [openFindFunction, setOpenFindFunction] = useState(null);
-  const [showBookmarksBar, setShowBookmarksBar] = useState(true);
+  const [showBookmarksBar, setShowBookmarksBar] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState({});
   const [bookmarksBar, setBookmarksBar] = useState([]);
   const [bookmarkQuery, setBookmarkQuery] = useState('');
 
@@ -33,10 +36,12 @@ const BrowserInterface = ({
       try {
         if (window.electronAPI) {
           let list = await window.electronAPI.getBookmarks();
-          const settings = await window.electronAPI.getSettings();
-          if (settings && Array.isArray(settings.bookmarksBarOrder)) {
+          const s = await window.electronAPI.getSettings();
+          setSettings(s || {});
+          setShowBookmarksBar(!!s?.showBookmarksBarDefault);
+          if (s && Array.isArray(s.bookmarksBarOrder)) {
             // reorder bookmarks by saved order (unknown URLs appended at end)
-            const order = settings.bookmarksBarOrder;
+            const order = s.bookmarksBarOrder;
             const byUrl = new Map((list || []).map(b => [b.url, b]));
             const ordered = order.map(u => byUrl.get(u)).filter(Boolean);
             const extras = (list || []).filter(b => !order.includes(b.url));
@@ -404,6 +409,7 @@ const BrowserInterface = ({
         isLoading={isLoading}
         canGoBack={canGoBack}
         canGoForward={canGoForward}
+  settings={settings}
         onNavigate={async (url) => {
           if (window.electronAPI) {
             await window.electronAPI.navigateToUrl(url);
@@ -419,6 +425,7 @@ const BrowserInterface = ({
         onShowHistory={() => setShowHistory(true)}
         onShowDownloads={() => setShowDownloads(true)}
         onOpenFind={() => openFindFunction && openFindFunction()}
+  onOpenSettings={() => setShowSettings(true)}
       />
 
       {/* Bookmarks Bar */}
@@ -573,6 +580,16 @@ const BrowserInterface = ({
       <DownloadsManager
         isOpen={showDownloads}
         onClose={() => setShowDownloads(false)}
+      />
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onApply={(s) => {
+          setSettings(s || {});
+          setShowBookmarksBar(!!s?.showBookmarksBarDefault);
+        }}
       />
 
       {/* Tab Context Menu */}

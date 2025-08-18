@@ -9,24 +9,41 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [errorMessage, setErrorMessage] = useState('');
   const [showFind, setShowFind] = useState(false);
 
+  // Keep latest callback props in refs so listener effect doesn't depend on changing identities
+  const onUrlChangeRef = useRef(onUrlChange);
+  const onFaviconChangeRef = useRef(onFaviconChange);
+  useEffect(() => { onUrlChangeRef.current = onUrlChange; }, [onUrlChange]);
+  useEffect(() => { onFaviconChangeRef.current = onFaviconChange; }, [onFaviconChange]);
+
+  // Track whether we've already exposed control callbacks to the parent to avoid update loops
+  const exposedOnceRef = useRef({ find: false, stop: false, zoom: false, audio: false });
+
   // Expose webviewRef to parent via callback
   useEffect(() => {
-    if (onOpenFind) {
+    if (onOpenFind && !exposedOnceRef.current.find) {
+      // Only expose a function to open the find UI on demand (once per mount)
       onOpenFind(() => setShowFind(true));
+      exposedOnceRef.current.find = true;
     }
   }, [onOpenFind]);
 
+  // Ensure find UI is closed on navigation changes
   useEffect(() => {
-    if (onStopAvailable) {
+    setShowFind(false);
+  }, [url]);
+
+  useEffect(() => {
+    if (onStopAvailable && !exposedOnceRef.current.stop) {
       onStopAvailable(() => {
         const webview = webviewRef.current;
         if (webview && webview.stop) webview.stop();
       });
+      exposedOnceRef.current.stop = true;
     }
   }, [onStopAvailable]);
 
   useEffect(() => {
-    if (onZoomAvailable) {
+    if (onZoomAvailable && !exposedOnceRef.current.zoom) {
       onZoomAvailable({
         zoomIn: () => {
           const webview = webviewRef.current;
@@ -46,11 +63,12 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           webview.setZoomFactor(1);
         }
       });
+      exposedOnceRef.current.zoom = true;
     }
   }, [onZoomAvailable]);
 
   useEffect(() => {
-    if (onAudioAvailable) {
+    if (onAudioAvailable && !exposedOnceRef.current.audio) {
       onAudioAvailable({
         toggleMute: () => {
           const webview = webviewRef.current;
@@ -59,6 +77,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           webview.setAudioMuted(!muted);
         }
       });
+      exposedOnceRef.current.audio = true;
     }
   }, [onAudioAvailable]);
 
@@ -77,12 +96,12 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     setLoadProgress(0);
 
     // Handle navigation events
-    const handleNavigation = async () => {
+  const handleNavigation = async () => {
       try {
         const currentUrl = webview.getURL();
         const title = webview.getTitle();
         console.log('Navigation:', currentUrl, title);
-        onUrlChange(currentUrl, title);
+    onUrlChangeRef.current && onUrlChangeRef.current(currentUrl, title);
         
         // Add to history
         if (window.electronAPI && currentUrl && currentUrl !== 'about:blank') {
@@ -137,8 +156,8 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     };
 
     const handleFaviconUpdated = (event) => {
-      if (onFaviconChange) {
-        onFaviconChange(event.favicons || []);
+      if (onFaviconChangeRef.current) {
+        onFaviconChangeRef.current(event.favicons || []);
       }
     };
 
@@ -196,7 +215,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
   webview.removeEventListener('permissionrequest', handlePermissionRequest);
     };
-  }, [url, onUrlChange, onFaviconChange]);
+  }, [url]);
 
   if (hasError) {
     return (
