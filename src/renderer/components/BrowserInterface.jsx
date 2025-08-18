@@ -17,7 +17,7 @@ const BrowserInterface = ({
   onReload
 }) => {
   const [tabs, setTabs] = useState([
-    { id: 1, url: currentUrl || 'about:blank', title: 'New Tab', active: true }
+    { id: 1, url: currentUrl || 'about:blank', title: 'New Tab', active: true, pinned: false }
   ]);
   const [activeTabId, setActiveTabId] = useState(1);
   const [showBookmarks, setShowBookmarks] = useState(false);
@@ -32,7 +32,16 @@ const BrowserInterface = ({
     const load = async () => {
       try {
         if (window.electronAPI) {
-          const list = await window.electronAPI.getBookmarks();
+          let list = await window.electronAPI.getBookmarks();
+          const settings = await window.electronAPI.getSettings();
+          if (settings && Array.isArray(settings.bookmarksBarOrder)) {
+            // reorder bookmarks by saved order (unknown URLs appended at end)
+            const order = settings.bookmarksBarOrder;
+            const byUrl = new Map((list || []).map(b => [b.url, b]));
+            const ordered = order.map(u => byUrl.get(u)).filter(Boolean);
+            const extras = (list || []).filter(b => !order.includes(b.url));
+            list = [...ordered, ...extras];
+          }
           setBookmarksBar(list || []);
         }
       } catch {}
@@ -51,20 +60,23 @@ const BrowserInterface = ({
   const [closedTabs, setClosedTabs] = useState([]);
   const dragIndexRef = useRef(null);
   const importInputRef = useRef(null);
+  const [tabMenu, setTabMenu] = useState({ open: false, x: 0, y: 0, tabId: null });
+  const bookmarksDragIndexRef = useRef(null);
 
   // Restore last session tabs from localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem('nebula.session.tabs');
-      if (saved) {
+  if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.tabs) && parsed.tabs.length) {
           setTabs(parsed.tabs.map(t => ({
             id: t.id || Date.now(),
             url: t.url || 'about:blank',
             title: t.title || 'New Tab',
-            active: !!t.active,
-            favicon: t.favicon || null
+    active: !!t.active,
+    favicon: t.favicon || null,
+    pinned: !!t.pinned
           })));
           const active = parsed.tabs.find(t => t.active) || parsed.tabs[0];
           if (active && active.url) {
@@ -94,7 +106,8 @@ const BrowserInterface = ({
       id: Date.now(),
       url: 'about:blank',
       title: 'New Tab',
-      active: false
+      active: false,
+      pinned: false
     };
     
     setTabs(prevTabs => [
@@ -147,6 +160,13 @@ const BrowserInterface = ({
   };
 
   // Drag-and-drop tab reordering
+  // Compute display order with pinned tabs first
+  const displayTabs = useMemo(() => {
+    const pinnedTabs = tabs.filter(t => t.pinned);
+    const normalTabs = tabs.filter(t => !t.pinned);
+    return [...pinnedTabs, ...normalTabs];
+  }, [tabs]);
+
   const handleTabDragStart = (index) => (e) => {
     dragIndexRef.current = index;
     e.dataTransfer.effectAllowed = 'move';
@@ -163,10 +183,32 @@ const BrowserInterface = ({
     const to = index;
     dragIndexRef.current = null;
     if (from == null || from === to) return;
+    // Reorder within pinned or within normal segment only
+    const fromTab = displayTabs[from];
+    const toTab = displayTabs[to];
+    if (!fromTab || !toTab) return;
+    if (fromTab.pinned !== toTab.pinned) return; // don't cross segments
+
     setTabs(prev => {
       const arr = [...prev];
-      const [moved] = arr.splice(from, 1);
-      arr.splice(to, 0, moved);
+      const segmentFlag = fromTab.pinned;
+      const segmentIdxs = arr
+        .map((t, i) => ({ t, i }))
+        .filter(x => x.t.pinned === segmentFlag)
+        .map(x => x.i);
+      // Build segment order array
+      const segment = segmentIdxs.map(i => arr[i]);
+      const fromId = fromTab.id;
+      const toId = toTab.id;
+      const segFrom = segment.findIndex(t => t.id === fromId);
+      const segTo = segment.findIndex(t => t.id === toId);
+      if (segFrom === -1 || segTo === -1) return prev;
+      const [moved] = segment.splice(segFrom, 1);
+      segment.splice(segTo, 0, moved);
+      // Write back segment into arr
+      segmentIdxs.forEach((arrIdx, k) => {
+        arr[arrIdx] = segment[k];
+      });
       return arr;
     });
   };
@@ -184,6 +226,38 @@ const BrowserInterface = ({
   const handleTabFaviconChange = (tabId, favicons) => {
     const favicon = Array.isArray(favicons) && favicons.length ? favicons[0] : null;
     setTabs(prevTabs => prevTabs.map(tab => tab.id === tabId ? { ...tab, favicon } : tab));
+  };
+
+  // Tab context menu actions
+  const handlePinToggle = (tabId) => {
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, pinned: !t.pinned } : t));
+  };
+
+  const handleDuplicateTab = (tabId) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(t => t.id === tabId);
+      if (idx === -1) return prev;
+      const src = prev[idx];
+      const dup = { ...src, id: Date.now(), active: true };
+      const next = prev.map(t => ({ ...t, active: false }));
+      next.splice(idx + 1, 0, dup);
+      setActiveTabId(dup.id);
+      onNavigate(dup.url || 'about:blank');
+      return next;
+    });
+  };
+
+  const handleCloseOthers = (tabId) => {
+    setTabs(prev => prev.filter(t => t.id === tabId));
+    setActiveTabId(tabId);
+  };
+
+  const handleCloseToRight = (tabId) => {
+    const idxInDisplay = displayTabs.findIndex(t => t.id === tabId);
+    if (idxInDisplay === -1) return;
+    const keepIds = new Set(displayTabs.slice(0, idxInDisplay + 1).map(t => t.id));
+    setTabs(prev => prev.filter(t => keepIds.has(t.id)));
+    setActiveTabId(tabId);
   };
 
   // Quality of life keyboard shortcuts
@@ -214,7 +288,6 @@ const BrowserInterface = ({
         if (openFindFunction) openFindFunction();
         return;
       }
-
       // Reopen closed tab: Cmd/Ctrl+Shift+T
       if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
         e.preventDefault();
@@ -229,7 +302,6 @@ const BrowserInterface = ({
         }
         return;
       }
-
       // Cycle tabs: Ctrl/Cmd+Tab (next) and Ctrl/Cmd+Shift+Tab (prev)
       if (meta && e.key === 'Tab') {
         e.preventDefault();
@@ -241,7 +313,6 @@ const BrowserInterface = ({
         handleSwitchTab(nextTab.id);
         return;
       }
-
       // Switch to tab by number: Cmd/Ctrl+1..8 (nth), 9 (last)
       if (meta && !e.shiftKey && !e.altKey) {
         const num = parseInt(e.key, 10);
@@ -253,7 +324,6 @@ const BrowserInterface = ({
           return;
         }
       }
-
       // Zoom controls: Cmd/Ctrl + '+', '-', '0'
       if (meta && !e.shiftKey && !e.altKey) {
         if (e.key === '=' || e.key === '+') { // zoom in
@@ -283,14 +353,18 @@ const BrowserInterface = ({
   }, [activeTabId, openFindFunction, tabs, zoomFns, audioFns, closedTabs]);
 
   return (
-    <div className="browser-interface">
+    <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
       {/* Tab Bar */}
       <div className="tab-bar" onDoubleClick={handleNewTab}>
-        {tabs.map((tab, idx) => (
+        {displayTabs.map((tab, idx) => (
           <div
             key={tab.id}
-            className={`tab ${tab.active ? 'active' : ''}`}
+            className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''}`}
             onClick={() => handleSwitchTab(tab.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id });
+            }}
             onMouseDown={(e) => {
               // Middle-click closes tab
               if (e.button === 1) {
@@ -303,17 +377,20 @@ const BrowserInterface = ({
             onDragOver={handleTabDragOver(idx)}
             onDrop={handleTabDrop(idx)}
           >
+            {tab.pinned && <span style={{ marginRight: 6 }}>📌</span>}
             {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, marginRight: 8, borderRadius: 3 }} />}
             <span className="tab-title">{tab.title}</span>
-            <button
-              className="tab-close"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCloseTab(tab.id);
-              }}
-            >
-              ×
-            </button>
+            {!tab.pinned && (
+              <button
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCloseTab(tab.id);
+                }}
+              >
+                ×
+              </button>
+            )}
           </div>
         ))}
         <button className="new-tab-button" onClick={handleNewTab}>
@@ -364,6 +441,36 @@ const BrowserInterface = ({
                   handleTabUrlChange(activeTabId, b.url, b.title);
                 }}
                 title={b.title || b.url}
+                draggable={bookmarkQuery.trim() === ''}
+                onDragStart={(e) => {
+                  if (bookmarkQuery.trim() !== '') return;
+                  bookmarksDragIndexRef.current = i;
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(e) => {
+                  if (bookmarkQuery.trim() !== '') return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={async (e) => {
+                  if (bookmarkQuery.trim() !== '') return;
+                  e.preventDefault();
+                  const from = bookmarksDragIndexRef.current;
+                  const to = i;
+                  bookmarksDragIndexRef.current = null;
+                  if (from == null || from === to) return;
+                  setBookmarksBar(prev => {
+                    const arr = [...prev];
+                    const [m] = arr.splice(from, 1);
+                    arr.splice(to, 0, m);
+                    // Persist order by URL list
+                    try {
+                      const order = arr.map(x => x.url);
+                      window.electronAPI?.updateSettings({ bookmarksBarOrder: order });
+                    } catch {}
+                    return arr;
+                  });
+                }}
                 style={{
                   background: '#f1f5f9', border: '1px solid #e2e8f0', color: '#334155',
                   borderRadius: 10, padding: '6px 10px', fontSize: 12, whiteSpace: 'nowrap'
@@ -467,8 +574,43 @@ const BrowserInterface = ({
         isOpen={showDownloads}
         onClose={() => setShowDownloads(false)}
       />
+
+      {/* Tab Context Menu */}
+      {tabMenu.open && (
+        <div
+          style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 6, minWidth: 180 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MenuItem label={(() => {
+            const t = tabs.find(t => t.id === tabMenu.tabId);
+            return t?.pinned ? 'Unpin tab' : 'Pin tab';
+          })()} onClick={() => { handlePinToggle(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+          <MenuItem label="Duplicate tab" onClick={() => { handleDuplicateTab(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+          <MenuItem label="Mute tab" onClick={() => {
+            handleSwitchTab(tabMenu.tabId);
+            setTimeout(() => { audioFns.toggleMute && audioFns.toggleMute(); }, 0);
+            setTabMenu({ open: false, x: 0, y: 0, tabId: null });
+          }} />
+          <hr style={{ border: 'none', height: 1, background: '#e2e8f0', margin: '6px 0' }} />
+          <MenuItem label="Close tab" onClick={() => { handleCloseTab(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+          <MenuItem label="Close others" onClick={() => { handleCloseOthers(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+          <MenuItem label="Close tabs to the right" onClick={() => { handleCloseToRight(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+        </div>
+      )}
     </div>
   );
 };
+
+// Lightweight menu item component
+const MenuItem = ({ label, onClick }) => (
+  <div
+    onClick={onClick}
+    style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#0f172a' }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+  >
+    {label}
+  </div>
+);
 
 export default BrowserInterface;

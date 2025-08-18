@@ -9,6 +9,14 @@ let currentBrowserView;
 // Development mode detection
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+// Improve media compatibility (e.g., YouTube autoplay after user intent)
+// Note: This relaxes Chromium's autoplay policy for smoother video playback
+try {
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+} catch (e) {
+  // no-op
+}
+
 function createWindow() {
   try {
     // Configure session security before creating window
@@ -38,19 +46,25 @@ function createWindow() {
     console.log('Development mode:', isDev);
     
     if (isDev) {
-      // Wait a bit for Vite server to be ready
-      console.log('Waiting 1 second for Vite server...');
-      setTimeout(async () => {
+      // Wait a bit for Vite server to be ready, then try dev URL; fallback to built index.html
+      const tryDevThenFallback = async () => {
         try {
           console.log('Loading development URL: http://localhost:3000');
           await mainWindow.loadURL('http://localhost:3000');
           console.log('Successfully loaded development URL');
         } catch (err) {
-          console.error('Failed to load development URL:', err);
-          // Show window anyway so user can see the error
-          mainWindow.show();
+          console.error('Failed to load development URL, falling back to built index.html:', err);
+          try {
+            const builtIndex = path.join(__dirname, '../../build/index.html');
+            console.log('Loading built file:', builtIndex);
+            await mainWindow.loadFile(builtIndex);
+          } catch (fallbackErr) {
+            console.error('Failed to load built index.html:', fallbackErr);
+          }
         }
-      }, 1000);
+      };
+      console.log('Waiting 1 second for Vite server...');
+      setTimeout(() => { tryDevThenFallback(); }, 1000);
       mainWindow.webContents.openDevTools(); // Open DevTools in development
     } else {
       mainWindow.loadFile(path.join(__dirname, '../../build/index.html')).catch(err => {
@@ -112,14 +126,17 @@ function createWindow() {
   // Security: Handle navigation attempts for main window only
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
-    
-    // Allow navigation to localhost in development
-    if (isDev && parsedUrl.origin === 'http://localhost:3000') {
-      return;
+    // Allow dev server and local file loads
+    if (isDev) {
+      if (parsedUrl.protocol === 'file:' || parsedUrl.origin === 'http://localhost:3000') {
+        return;
+      }
+    } else {
+      if (parsedUrl.protocol === 'file:') {
+        return;
+      }
     }
-    
-    // Block navigation away from our app in the main window
-    // (but allow webview navigation)
+    // Block navigation away from our app in the main window (webview still allowed elsewhere)
     event.preventDefault();
     console.log('Blocked main window navigation to:', navigationUrl);
   });

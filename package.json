@@ -24,11 +24,13 @@
     "files": [
       "build/**/*",
       "src/main/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "package.json"
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+  "target": "dmg",
+  "identity": null
     },
     "win": {
       "target": "nsis"
@@ -55,8 +57,7 @@
   "dependencies": {
     "electron-store": "^8.0.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "sqlite3": "^5.0.0"
+  "react-dom": "^18.0.0"
   },
   "keywords": [
     "browser",

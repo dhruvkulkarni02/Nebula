@@ -56,6 +56,7 @@
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   min-height: 48px;
   max-width: 700px;
+  position: relative;
 }
 
 .address-bar:focus-within {
@@ -200,4 +201,51 @@
 .stop-button:hover {
   background: rgba(220, 38, 38, 0.12);
   transform: translateY(-1px);
+}
+
+/* Autocomplete suggestions */
+.suggestions {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  padding: 6px;
+  z-index: 1000; /* ensure above other UI like tabs/bookmarks bar */
+  max-height: 320px; /* prevent overflow off-screen */
+  overflow-y: auto;
+}
+
+.suggestion {
+  display: grid;
+  grid-template-columns: 1fr auto 24px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.suggestion:hover,
+.suggestion.active {
+  background: #f8fafc;
+}
+
+.s-title {
+  font-size: 13px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.s-url {
+  font-size: 12px;
+  color: #475569;
+  justify-self: start;
+}
+
+.s-src {
+  justify-self: end;
 }

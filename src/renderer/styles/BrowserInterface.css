@@ -15,6 +15,8 @@
   min-height: 48px;
   user-select: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .tab {
@@ -236,4 +238,15 @@
   background: #0d1117;
   border-radius: 0 0 8px 8px;
   position: relative;
+}
+
+/* Pinned tabs are compact */
+.tab.pinned {
+  min-width: 48px;
+  max-width: 100px;
+  padding: 8px 12px;
+}
+
+.tab.pinned .tab-title {
+  max-width: 60px;
 }

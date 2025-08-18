@@ -65,13 +65,11 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   useEffect(() => {
     // Only set up event listeners if we have a valid URL and webview element
     if (!url || url === 'about:blank' || !webviewRef.current) {
-      console.log('⚠️ WebView useEffect: Skipping setup - no URL or webview ref');
+      // Silently bail when there's no actionable URL or ref to avoid log spam during app idle/start page
       return;
     }
 
-    const webview = webviewRef.current;
-    console.log('🌐 WebView component mounted, URL:', url);
-    console.log('🔍 WebView element:', webview);
+  const webview = webviewRef.current;
 
     // Reset error state when URL changes
     setHasError(false);
@@ -107,8 +105,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     };
 
     const handleLoadProgress = (event) => {
-      const progress = Math.round(event.progress * 100);
-      console.log('Load progress:', progress + '%');
+      const progress = Math.round((event?.progress || 0) * 100);
       setLoadProgress(progress);
     };
 
@@ -124,9 +121,12 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     };
 
     const handleFailLoad = (event) => {
-      console.error('WebView load failed:', event);
+      const code = event?.errorCode;
+      const desc = event?.errorDescription || 'Unknown error';
+      const vurl = event?.validatedURL || url;
+      console.error('WebView load failed:', { code, desc, url: vurl });
       setHasError(true);
-      setErrorMessage(`Failed to load: ${event.errorDescription || 'Unknown error'}`);
+      setErrorMessage(`Failed to load (${code}): ${desc}`);
       setLoadProgress(0);
     };
 
@@ -142,6 +142,16 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       }
     };
 
+    // Handle permission requests (media/fullscreen)
+    const handlePermissionRequest = (e) => {
+      const p = e?.permission;
+      if (["media", "microphone", "camera", "fullscreen", "pointerLock"].includes(p)) {
+        try { e.request?.allow(); } catch {}
+      } else {
+        try { e.request?.deny(); } catch {}
+      }
+    };
+
     // Add event listeners
     webview.addEventListener('dom-ready', handleDomReady);
     webview.addEventListener('did-start-loading', handleLoadStart);
@@ -152,6 +162,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     webview.addEventListener('did-navigate', handleNavigation);
     webview.addEventListener('did-navigate-in-page', handleNavigation);
     webview.addEventListener('page-favicon-updated', handleFaviconUpdated);
+    webview.addEventListener('permissionrequest', handlePermissionRequest);
 
     // Security: Add console message handler for debugging
     webview.addEventListener('console-message', (e) => {
@@ -183,6 +194,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       webview.removeEventListener('did-navigate', handleNavigation);
       webview.removeEventListener('did-navigate-in-page', handleNavigation);
       webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
+  webview.removeEventListener('permissionrequest', handlePermissionRequest);
     };
   }, [url, onUrlChange, onFaviconChange]);
 
@@ -232,7 +244,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           // Security settings - balance security with compatibility
           nodeintegration="false"
           webpreferences="contextIsolation=true,enableRemoteModule=false,sandbox=false"
-          allowpopups="true"
+          allowpopups
           // Enable JavaScript and modern web features
           plugins="true"
           // Updated user agent for better compatibility with modern websites
