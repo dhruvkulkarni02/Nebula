@@ -1,0 +1,88 @@
+# .gitignore for NebulaBrowser
+
+# Build artifacts
+build/
+dist/
+target/
+*.exe
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.appimage
+
+# Platform-specific
+.DS_Store
+Thumbs.db
+*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js/Electron
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# Python
+# __pycache__/
+# *.py[cod]
+# *$py.class
+# *.so
+# .Python
+# env/
+# venv/
+# .env
+
+# Rust
+# target/
+# Cargo.lock (uncomment if library)
+
+# C++
+# *.o
+# *.obj
+# *.lib
+# *.dll
+# *.exe
+
+# Qt
+# *.pro.user
+# *.pro.user.*
+# moc_*.cpp
+# qrc_*.cpp
+# ui_*.h
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# User data (should not be committed)
+user_data/
+profiles/
+cache/
+cookies/
+history/
+bookmarks/
+
+# Security-sensitive files
+certificates/private/
+keys/
+secrets/
+
+# Testing
+coverage/
+test-results/
+*.test
+
+# Documentation builds
+docs/_build/
+docs/build/

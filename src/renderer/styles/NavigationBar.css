@@ -1,0 +1,183 @@
+.navigation-bar {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  min-height: 68px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  user-select: none;
+  gap: 16px;
+}
+
+.nav-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.nav-button {
+  background: transparent;
+  border: none;
+  border-radius: 14px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #111827;
+  font-size: 20px; /* emojis look better a bit larger */
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.nav-button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.nav-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.address-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 28px;
+  padding: 0 24px;
+  margin: 0 16px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 48px;
+  max-width: 700px;
+}
+
+.address-bar:focus-within {
+  border-color: #3b82f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.url-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-weight: 400;
+  padding: 12px 0;
+  line-height: 1.4;
+}
+
+.url-input::placeholder {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.security-indicator {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #dcfce7;
+  color: #166534;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.security-indicator.secure {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.security-indicator.insecure {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.menu-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.menu-button {
+  background: transparent;
+  border: none;
+  border-radius: 14px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #111827;
+  font-size: 20px;
+  transition: background 0.15s ease, transform 0.15s ease;
+  position: relative;
+}
+
+.menu-button:hover {
+  background: rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
+}
+
+.menu-button.active {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.menu-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  color: #94a3b8;
+}
+
+.menu-button.bookmarked {
+  background: rgba(250, 204, 21, 0.2); /* amber-300 at ~20% */
+}
+
+.reload-button {
+  background: transparent;
+  border: none;
+  border-radius: 14px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #16a34a;
+  font-size: 20px;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.reload-button:hover {
+  background: rgba(34, 197, 94, 0.12);
+  transform: translateY(-1px);
+}
+
+.reload-button.loading {
+  animation: spin 1s linear infinite;
+}
+
+.reload-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

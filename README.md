@@ -1,53 +1,151 @@
-# Nebula
+# NebulaBrowser
 
-NebulaBrowser is a minimal, privacy-focused desktop web browser built in Python using PyQt and Qt WebEngine. Designed for speed, simplicity, and user empowerment, NebulaBrowser gives you the web—your way.
+A minimal, privacy-focused desktop web browser designed with modularity and user privacy at its core.
 
-## Features
+## 🌟 Features
 
-- **Tabbed browsing**: Open multiple sites at once.
-- **Navigation controls**: Back, Forward, Reload, and Home.
-- **Bookmark management**: Save, organize, and revisit your favorite sites.
-- **Tracker/ad blocking**: Protects your privacy from cross-site tracking.
-- **Private mode**: Browse without leaving traces on your system.
-- **Lightweight UI**: Fast startup, clean interface.
+- **Privacy-First**: Built-in ad and tracker blocking
+- **Minimal Design**: Clean, distraction-free interface
+- **Cross-Platform**: Support for Windows, macOS, and Linux
+- **Modular Architecture**: Easily extensible and maintainable
+- **Private Browsing**: Comprehensive incognito mode
+- **Fast & Lightweight**: Optimized for performance
 
-## Screenshots
+## 🚀 Quick Start
 
-*Add screenshots here once implemented!*
+### Prerequisites
 
-## Installation
+```bash
+# Node.js 18+ and npm (or yarn)
+node --version  # Should be 18+
+npm --version   # Latest stable version
 
-1. **Clone the repository:**
-    ```
-    git clone https://github.com/yourusername/NebulaBrowser.git
-    cd NebulaBrowser
-    ```
+# Git for version control
+git --version
+```
 
-2. **Set up dependencies (Python 3.x required):**
-    ```
-    pip install -r requirements.txt
-    ```
+### Installation
 
-3. **Run the browser:**
-    ```
-    python main.py
-    ```
+```bash
+# Clone the repository
+git clone https://github.com/[username]/NebulaBrowser.git
+cd NebulaBrowser
 
-## Usage
+# Install dependencies
+npm install
 
-- Use the address bar to visit websites.
-- Click bookmark icon to save current page.
-- Switch tabs using the plus button or keyboard shortcuts.
-- Enable/disable tracker blocking in settings.
+# Run in development mode
+npm run dev
 
-## Customization
+# Or start the built version
+npm start
+```
 
-- Modify the `themes/` folder to create custom browser themes.
-- Edit the `blocklist.txt` file for personalized tracker/ad blocking.
+## 🏗️ Development
 
-## Contributing
+### Project Structure
 
-Pull requests, bug reports, and feature suggestions are welcome! For major changes, please open an issue first for discussion.
+```
+src/
+├── core/          # Browser engine and core logic
+├── ui/            # User interface components
+├── privacy/       # Privacy and security features
+├── storage/       # Data persistence layer
+└── platform/      # Platform-specific implementations
+```
+
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed architecture information.
+
+### Building from Source
+
+```bash
+# Development build with hot reload
+npm run dev
+
+# Production build
+npm run build
+
+# Run tests
+npm test
+
+# Lint code
+npm run lint
+```
+
+### Technology Stack
+
+**Framework**: `Electron` - Cross-platform desktop apps with web technologies  
+**Language**: `JavaScript/TypeScript with React` - Modern web development stack  
+**Web Engine**: `Chromium` - Full web standards support and security  
+**Build System**: `Vite` - Fast development and optimized production builds
+
+## 🔒 Privacy Features
+
+- **Ad & Tracker Blocking**: Built-in blocklists and custom filters
+- **Private Browsing**: No history, cookies, or data persistence
+- **Data Protection**: Secure data handling and optional encryption
+- **Permission Management**: Granular control over site permissions
+- **Secure Connections**: HTTPS-first browsing with certificate validation
+
+## 📖 Documentation
+
+- [Development Roadmap](docs/ROADMAP.md)
+- [API Documentation](docs/api/)
+- [User Guide](docs/user/)
+- [Contributing Guidelines](CONTRIBUTING.md)
+
+## 🛣️ Roadmap
+
+### Phase 1: Core Browser (Milestone 1-2)
+- Basic web page rendering
+- Navigation controls and URL handling
+
+### Phase 2: Essential Features (Milestone 3-4)  
+- Tabbed interface
+- Bookmark management
+
+### Phase 3: Privacy & Security (Milestone 5-6)
+- Ad/tracker blocking
+- Private browsing mode
+
+### Phase 4: Polish & Distribution (Milestone 7-8)
+- Settings and preferences
+- Cross-platform packaging
+
+See [ROADMAP.md](docs/ROADMAP.md) for detailed milestone information.
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes and add tests
+4. Commit: `git commit -m 'Add amazing feature'`
+5. Push: `git push origin feature/amazing-feature`
+6. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the [LICENSE_TYPE] License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Privacy-focused browser projects that inspire our work
+- Open-source web engine projects
+- The developer community for tools and libraries
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/[username]/NebulaBrowser/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/[username]/NebulaBrowser/discussions)
+- **Documentation**: [Project Wiki](https://github.com/[username]/NebulaBrowser/wiki)
+
+---
+
+**Note**: This project is in active development. See the [roadmap](docs/ROADMAP.md) for current status and upcoming features.
 
 ## Future Roadmap
 

@@ -1,0 +1,153 @@
+.find-in-page {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+  animation: slideDown 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.find-input {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #1e293b;
+  width: 200px;
+  transition: all 0.2s ease;
+}
+
+.find-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.find-input::placeholder {
+  color: #94a3b8;
+}
+
+.find-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.find-button {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.find-button:hover:not(:disabled) {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+  transform: scale(1.05);
+}
+
+.find-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #cbd5e1;
+}
+
+.find-info {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  min-width: 60px;
+  text-align: center;
+}
+
+.find-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  margin-left: 4px;
+}
+
+.find-close:hover {
+  background: #ef4444;
+  color: #ffffff;
+  transform: scale(1.1);
+}
+
+.find-options {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid #e2e8f0;
+}
+
+.find-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.find-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.find-checkbox input[type="checkbox"]:checked {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.find-highlight {
+  background: #fef3c7 !important;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #f59e0b;
+}
+
+.find-highlight.current {
+  background: #fbbf24 !important;
+  box-shadow: 0 0 0 2px #d97706;
+}
