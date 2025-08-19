@@ -3,8 +3,8 @@
 .bookmarks-panel {
   width: 360px;
   height: 100%;
-  background: #ffffff;
-  border-right: 1px solid #e2e8f0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
@@ -13,8 +13,8 @@
 
 .bookmarks-header {
   padding: 12px;
-  border-bottom: 1px solid #e2e8f0;
-  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -24,7 +24,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--fg);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -39,15 +39,16 @@
 .bookmark-search {
   width: 180px;
   padding: 6px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 20px;
   font-size: 12px;
-  background: #f8fafc;
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .close-btn {
   background: transparent;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
@@ -65,8 +66,8 @@
 }
 
 .bookmark-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px;
   cursor: pointer;
@@ -74,8 +75,8 @@
 }
 
 .bookmark-card:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: var(--border);
   transform: translateY(-2px);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
 }
@@ -102,8 +103,8 @@
   height: 18px;
   margin-right: 8px;
   border-radius: 4px;
-  background: #e2e8f0;
-  color: #475569;
+  background: var(--muted);
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
   font-size: 12px;
   font-weight: 700;
   align-items: center;
@@ -115,7 +116,7 @@
 .bookmark-title {
   font-size: 14px;
   font-weight: 500;
-  color: #1e293b;
+  color: var(--fg);
   margin: 0 0 4px 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -124,7 +125,7 @@
 
 .bookmark-host {
   font-size: 12px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -132,7 +133,7 @@
 
 .bookmark-url {
   font-size: 11px;
-  color: #94a3b8;
+  color: color-mix(in srgb, var(--fg) 50%, transparent);
   margin-top: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -160,14 +161,14 @@
 .empty-state {
   padding: 40px 20px;
   text-align: center;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
 }
 
 .empty-state h4 {
   margin: 0 0 8px 0;
   font-size: 16px;
   font-weight: 600;
-  color: #475569;
+  color: var(--fg);
 }
 
 .empty-state p {

@@ -4,6 +4,7 @@ const fs = require('fs');
 
 // Keep a global reference of the window object
 let mainWindow;
+let settingsWindow;
 let currentBrowserView;
 // Simple content blocking state and helpers
 let adBlockEnabled = false;
@@ -195,6 +196,67 @@ function createWindow() {
     }
   });
 }
+
+function createSettingsWindow() {
+  try {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.show();
+      settingsWindow.focus();
+      return settingsWindow;
+    }
+    settingsWindow = new BrowserWindow({
+      width: 760,
+      height: 560,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      parent: mainWindow || undefined,
+      modal: false,
+      title: 'Settings',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        enableRemoteModule: false,
+        preload: path.join(__dirname, 'preload.js'),
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        experimentalFeatures: false,
+      },
+      show: false,
+    });
+
+    if (isDev) {
+      const tryDevThenFallback = async () => {
+        try {
+          await settingsWindow.loadURL('http://localhost:3000?settingsWindow=1');
+        } catch (err) {
+          try {
+            const builtIndex = path.join(__dirname, '../../build/index.html');
+            await settingsWindow.loadFile(builtIndex, { query: { settingsWindow: '1' } });
+          } catch (fallbackErr) {
+            console.error('Failed to load Settings window in dev and fallback:', fallbackErr);
+          }
+        }
+      };
+      setTimeout(() => { tryDevThenFallback(); }, 300);
+    } else {
+      const indexPath = path.join(__dirname, '../../build/index.html');
+      settingsWindow.loadFile(indexPath, { query: { settingsWindow: '1' } }).catch(() => {});
+    }
+
+    settingsWindow.once('ready-to-show', () => settingsWindow && settingsWindow.show());
+    settingsWindow.on('closed', () => { settingsWindow = null; });
+    return settingsWindow;
+  } catch (e) {
+    console.error('Failed to create settings window:', e);
+  }
+}
+
+// IPC to open settings window
+ipcMain.handle('open-settings-window', async () => {
+  createSettingsWindow();
+  return { ok: true };
+});
 
 function configureSessionSecurity() {
   try {
@@ -934,6 +996,13 @@ function setupIpcHandlers() {
       adBlockEnabled = !!updated.enableAdBlocker;
       console.log('Ad blocker now', adBlockEnabled ? 'ENABLED' : 'DISABLED');
     }
+    // Notify all renderer windows that settings changed
+    try {
+      const { BrowserWindow } = require('electron');
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { w.webContents.send('settings-updated', updated); } catch {}
+      }
+    } catch {}
     return { success: ok, settings: updated };
   });
 

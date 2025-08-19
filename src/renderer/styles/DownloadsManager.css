@@ -1,8 +1,8 @@
 .downloads-manager {
   width: 350px;
   height: 100%;
-  background: #ffffff;
-  border-right: 1px solid #e2e8f0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
@@ -10,15 +10,15 @@
 
 .downloads-header {
   padding: 16px;
-  border-bottom: 1px solid #e2e8f0;
-  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
 }
 
 .downloads-header h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--fg);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -26,7 +26,7 @@
 
 .downloads-stats {
   font-size: 12px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   margin-top: 4px;
 }
 
@@ -37,8 +37,8 @@
 }
 
 .download-item {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 8px;
@@ -47,10 +47,10 @@
 }
 
 .download-item:hover {
-  background: #f8fafc;
-  border-color: #3b82f6;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .download-header {
@@ -82,7 +82,7 @@
 .download-name {
   font-size: 14px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--fg);
   margin: 0 0 4px 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -91,7 +91,7 @@
 
 .download-url {
   font-size: 12px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   margin: 0 0 4px 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -100,7 +100,7 @@
 
 .download-size {
   font-size: 11px;
-  color: #94a3b8;
+  color: color-mix(in srgb, var(--fg) 50%, transparent);
   font-weight: 500;
 }
 
@@ -111,7 +111,7 @@
 .progress-bar {
   width: 100%;
   height: 6px;
-  background: #f1f5f9;
+  background: var(--muted);
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -119,7 +119,7 @@
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #1d4ed8) 100%);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
@@ -137,7 +137,7 @@
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
 }
 
 .download-status {

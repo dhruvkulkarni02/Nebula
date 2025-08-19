@@ -72,6 +72,14 @@ const BrowserInterface = ({
       } catch {}
     };
     load();
+    // live updates from other windows
+    try {
+      const handler = (_e, data) => {
+        if (data) setSettings(data);
+      };
+      window.electronAPI?.onSettingsUpdated?.(handler);
+      return () => window.electronAPI?.removeSettingsUpdatedListener?.(handler);
+    } catch {}
   }, []);
 
   // React to theme changes at runtime (from Settings)
@@ -92,8 +100,21 @@ const BrowserInterface = ({
       } else {
         applyTheme(settings.theme);
       }
+      // Apply custom accent color if provided
+      if (settings.accentColor) {
+        document.documentElement.style.setProperty('--accent', settings.accentColor);
+      }
     } catch {}
   }, [settings?.theme]);
+
+  // React to accent color changes
+  useEffect(() => {
+    try {
+      if (settings?.accentColor) {
+        document.documentElement.style.setProperty('--accent', settings.accentColor);
+      }
+    } catch {}
+  }, [settings?.accentColor]);
 
   const filteredBookmarks = useMemo(() => {
     const q = bookmarkQuery.trim().toLowerCase();
@@ -490,9 +511,9 @@ const BrowserInterface = ({
   onStop={() => stopLoadingFn && stopLoadingFn()}
         onShowBookmarks={() => setShowBookmarks(true)}
         onShowHistory={() => setShowHistory(true)}
-        onShowDownloads={() => setShowDownloads(true)}
-        onOpenFind={() => openFindFunction && openFindFunction()}
-  onOpenSettings={() => setShowSettings(true)}
+    onShowDownloads={() => setShowDownloads(true)}
+    onOpenFind={() => openFindFunction && openFindFunction()}
+  onOpenSettings={() => { try { window.electronAPI?.openSettingsWindow?.(); } catch {} }}
   progress={pageProgress}
   />)}
 
@@ -504,15 +525,15 @@ const BrowserInterface = ({
 
       {/* Bookmarks Bar */}
       {showBookmarksBar && (
-        <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: '8px 12px', borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
-          <span style={{ fontSize: 12, color: '#64748b', marginRight: 8, alignSelf: 'center' }}>Bookmarks</span>
+  <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+          <span style={{ fontSize: 12, color: 'color-mix(in srgb, var(--fg) 60%, transparent)', marginRight: 8, alignSelf: 'center' }}>Bookmarks</span>
           <input
             value={bookmarkQuery}
             onChange={(e) => setBookmarkQuery(e.target.value)}
             placeholder="Search bookmarks (title, url, #tag)"
-            style={{ flex: '0 0 240px', background: '#f9fafb', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}
+            style={{ flex: '0 0 240px', background: 'var(--bg)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}
           />
-          <select value={bookmarksSort} onChange={(e)=>setBookmarksSort(e.target.value)} style={{ fontSize:12, border:'1px solid #e2e8f0', borderRadius:8, padding:'6px 8px', background:'#fff' }}>
+          <select value={bookmarksSort} onChange={(e)=>setBookmarksSort(e.target.value)} style={{ fontSize:12, border:'1px solid var(--border)', borderRadius:8, padding:'6px 8px', background:'var(--panel)', color: 'var(--fg)' }}>
             <option value="custom">Custom</option>
             <option value="alpha">A→Z</option>
             <option value="recent">Recent</option>
@@ -527,11 +548,11 @@ const BrowserInterface = ({
                   const color = b.color || '#e2e8f0';
                   const pinned = !!b.pinned;
                   return (
-                    <div key={`${b.url}-${i}`} title={b.title || b.url} draggable={bookmarkQuery.trim()==='' } onDragStart={(e)=>{ if (bookmarkQuery.trim()!=='') return; bookmarksDragIndexRef.current = i; e.dataTransfer.effectAllowed='move'; }} onDragOver={(e)=>{ if (bookmarkQuery.trim()!=='') return; e.preventDefault(); e.dataTransfer.dropEffect='move'; }} onDrop={(e)=>{ if (bookmarkQuery.trim()!=='') return; e.preventDefault(); const from = bookmarksDragIndexRef.current; const to = i; bookmarksDragIndexRef.current=null; if (from==null||from===to) return; setBookmarksBar(prev=>{ const arr=[...prev]; const [m]=arr.splice(from,1); arr.splice(to,0,m); try{ const order=arr.map(x=>x.url); window.electronAPI?.updateSettings({ bookmarksBarOrder: order }); }catch{} return arr; }); }} style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'4px 8px', border:'1px solid #e2e8f0', borderRadius: 8, background:'#f8fafc', maxWidth: 260 }}>
+                    <div key={`${b.url}-${i}`} title={b.title || b.url} draggable={bookmarkQuery.trim()==='' } onDragStart={(e)=>{ if (bookmarkQuery.trim()!=='') return; bookmarksDragIndexRef.current = i; e.dataTransfer.effectAllowed='move'; }} onDragOver={(e)=>{ if (bookmarkQuery.trim()!=='') return; e.preventDefault(); e.dataTransfer.dropEffect='move'; }} onDrop={(e)=>{ if (bookmarkQuery.trim()!=='') return; e.preventDefault(); const from = bookmarksDragIndexRef.current; const to = i; bookmarksDragIndexRef.current=null; if (from==null||from===to) return; setBookmarksBar(prev=>{ const arr=[...prev]; const [m]=arr.splice(from,1); arr.splice(to,0,m); try{ const order=arr.map(x=>x.url); window.electronAPI?.updateSettings({ bookmarksBarOrder: order }); }catch{} return arr; }); }} style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'4px 8px', border:'1px solid var(--border)', borderRadius: 8, background:'color-mix(in srgb, var(--panel) 90%, var(--bg))', maxWidth: 260 }}>
                       <span style={{ fontSize:12 }}>{pinned?'📌':'⭐'}</span>
                       <span style={{ width: 8, height:8, borderRadius: 4, background: color }} />
-                      <button onClick={async ()=>{ if (window.electronAPI) await window.electronAPI.navigateToUrl(b.url); onNavigate(b.url); handleTabUrlChange(activeTabId, b.url, b.title); }} style={{ background:'transparent', border:'none', padding:0, cursor:'pointer', color:'#334155', fontSize:12, textOverflow:'ellipsis', whiteSpace:'nowrap', overflow:'hidden', maxWidth: 160 }}>{b.title || host || b.url}</button>
-                      <span style={{ color:'#94a3b8', fontSize:11, maxWidth: 120, overflow:'hidden', textOverflow:'ellipsis' }}>{host}</span>
+                      <button onClick={async ()=>{ if (window.electronAPI) await window.electronAPI.navigateToUrl(b.url); onNavigate(b.url); handleTabUrlChange(activeTabId, b.url, b.title); }} style={{ background:'transparent', border:'none', padding:0, cursor:'pointer', color:'var(--fg)', fontSize:12, textOverflow:'ellipsis', whiteSpace:'nowrap', overflow:'hidden', maxWidth: 160 }}>{b.title || host || b.url}</button>
+                      <span style={{ color:'color-mix(in srgb, var(--fg) 50%, transparent)', fontSize:11, maxWidth: 120, overflow:'hidden', textOverflow:'ellipsis' }}>{host}</span>
                       <button title="Open in new tab" onClick={()=>{ const newTab={ id:Date.now(), url:b.url, title:b.title||b.url, active:false, pinned:false}; setTabs(prev=>[...prev.map(t=>({...t,active:false})),{...newTab,active:true}]); setActiveTabId(newTab.id); onNavigate(b.url); }} style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:12 }}>🧭</button>
                       <button title="Edit" onClick={()=> setEditingBookmark(b)} style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:12 }}>✏️</button>
                     </div>
@@ -541,11 +562,11 @@ const BrowserInterface = ({
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            <button title="Export bookmarks" onClick={async () => { try { await window.electronAPI?.exportBookmarks(); } catch {} }} style={{ background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>⬇️ Export</button>
+            <button title="Export bookmarks" onClick={async () => { try { await window.electronAPI?.exportBookmarks(); } catch {} }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12, color: 'var(--fg)' }}>⬇️ Export</button>
             <input ref={importInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={async (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; try { const text = await f.text(); const data = JSON.parse(text); const res = await window.electronAPI?.importBookmarksData(data); if (res?.success) { const list = await window.electronAPI?.getBookmarks(); setBookmarksBar(list || []); } } catch {} e.target.value = ''; }} />
-            <button title="Import bookmarks (JSON)" onClick={() => importInputRef.current?.click()} style={{ background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>⬆️ Import</button>
-            <button title="Dedupe" onClick={async ()=>{ try{ const res = await window.electronAPI?.dedupeBookmarks(); if (res?.success){ const list = await window.electronAPI?.getBookmarks(); setBookmarksBar(list||[]);} }catch{} }} style={{ background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>🧹 Dedupe</button>
-            <button title="Toggle bookmarks bar" onClick={() => setShowBookmarksBar(v => !v)} style={{ background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>🧰 Toggle</button>
+            <button title="Import bookmarks (JSON)" onClick={() => importInputRef.current?.click()} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12, color: 'var(--fg)' }}>⬆️ Import</button>
+            <button title="Dedupe" onClick={async ()=>{ try{ const res = await window.electronAPI?.dedupeBookmarks(); if (res?.success){ const list = await window.electronAPI?.getBookmarks(); setBookmarksBar(list||[]);} }catch{} }} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12, color: 'var(--fg)' }}>🧹 Dedupe</button>
+            <button title="Toggle bookmarks bar" onClick={() => setShowBookmarksBar(v => !v)} style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 12, color: 'var(--fg)' }}>🧰 Toggle</button>
           </div>
         </div>
       )}
@@ -589,7 +610,7 @@ const BrowserInterface = ({
                   onDragStart={handleTabDragStart(idx)}
                   onDragOver={handleTabDragOver(idx)}
                   onDrop={handleTabDrop(idx)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid #cbd5e1' : '1px solid transparent', background: tab.active ? '#f8fafc' : 'transparent' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid var(--border)' : '1px solid transparent', background: tab.active ? 'color-mix(in srgb, var(--panel) 94%, var(--bg))' : 'transparent' }}
                 >
                   {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3 }} />}
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{tab.title}</span>
@@ -643,7 +664,7 @@ const BrowserInterface = ({
           onShowHistory={() => setShowHistory(true)}
           onShowDownloads={() => setShowDownloads(true)}
           onOpenFind={() => openFindFunction && openFindFunction()}
-          onOpenSettings={() => setShowSettings(true)}
+          onOpenSettings={() => { try { window.electronAPI?.openSettingsWindow?.(); } catch {} }}
           progress={pageProgress}
         />
       )}
@@ -680,20 +701,12 @@ const BrowserInterface = ({
         onClose={() => setShowDownloads(false)}
       />
 
-      {/* Settings Panel */}
-      <SettingsPanel
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        onApply={(s) => {
-          setSettings(s || {});
-          setShowBookmarksBar(!!s?.showBookmarksBarDefault);
-        }}
-      />
+  {/* Settings now opens in a separate window */}
 
       {/* Tab Context Menu */}
       {tabMenu.open && (
         <div
-          style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 6, minWidth: 180 }}
+          style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 6, minWidth: 180 }}
           onClick={(e) => e.stopPropagation()}
         >
           <MenuItem label={(() => {

@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('update-settings', settings),
+  onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', (_e, data) => callback?.(_e, data)),
+  removeSettingsUpdatedListener: (callback) => ipcRenderer.removeListener('settings-updated', callback),
+  openSettingsWindow: () => ipcRenderer.invoke('open-settings-window'),
 
   // Privacy
   clearBrowsingData: (options) => ipcRenderer.invoke('clear-browsing-data', options),

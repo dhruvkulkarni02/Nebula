@@ -2,7 +2,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: var(--bg);
   position: relative;
   min-height: 0; /* prevent flex overflow clipping and allow child to size */
   overflow: hidden;
@@ -13,7 +13,7 @@
   width: 100%;
   height: 100%;
   border: none;
-  background: #ffffff;
+  background: var(--bg);
 }
 
 .webview-loading {
@@ -22,7 +22,7 @@
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #1d4ed8) 100%);
   z-index: 10;
   animation: loadingProgress 2s ease-in-out infinite;
 }
@@ -45,7 +45,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--bg);
   padding: 40px;
   text-align: center;
 }
@@ -66,13 +66,13 @@
 .error-title {
   font-size: 24px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--fg);
   margin-bottom: 12px;
 }
 
 .error-message {
   font-size: 16px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   line-height: 1.6;
   margin-bottom: 24px;
   max-width: 500px;
@@ -86,35 +86,35 @@
 }
 
 .error-btn {
-  background: #3b82f6;
+  background: var(--accent);
   border: none;
   border-radius: 8px;
   padding: 12px 24px;
-  color: #ffffff;
+  color: var(--fg);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .error-btn:hover {
-  background: #2563eb;
+  background: color-mix(in srgb, var(--accent) 85%, black);
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .error-btn.secondary {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: var(--muted);
+  color: var(--fg);
+  border: 1px solid var(--border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .error-btn.secondary:hover {
-  background: #e2e8f0;
-  border-color: #cbd5e1;
-  color: #334155;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: var(--border);
+  color: var(--fg);
 }
 
 .webview-blocked {
@@ -123,7 +123,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--bg);
   padding: 40px;
   text-align: center;
 }
@@ -144,13 +144,13 @@
 .blocked-title {
   font-size: 24px;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--fg);
   margin-bottom: 12px;
 }
 
 .blocked-message {
   font-size: 16px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   line-height: 1.6;
   margin-bottom: 24px;
   max-width: 500px;
@@ -162,7 +162,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(255, 255, 255, 0.95);
+  background: color-mix(in srgb, var(--bg) 95%, transparent);
   backdrop-filter: blur(5px);
   display: flex;
   align-items: center;
@@ -173,8 +173,8 @@
 .loading-spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid #e2e8f0;
-  border-top: 3px solid #3b82f6;
+  border: 3px solid var(--border);
+  border-top: 3px solid var(--accent);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -188,12 +188,12 @@
   position: absolute;
   bottom: 16px;
   left: 16px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid #e2e8f0;
+  background: color-mix(in srgb, var(--bg) 95%, transparent);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 12px;
-  color: #64748b;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   z-index: 50;
@@ -202,8 +202,8 @@
 }
 
 .webview-info:hover {
-  background: rgba(255, 255, 255, 1);
-  border-color: #cbd5e1;
+  background: var(--panel);
+  border-color: var(--border);
 }
 
 .certificate-error {
