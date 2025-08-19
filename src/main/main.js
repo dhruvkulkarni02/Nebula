@@ -87,6 +87,8 @@ try {
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   // Privacy: Reduce WebRTC IP leak exposure
   app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'disable_non_proxied_udp');
+  // Improve trackpad swipe history navigation
+  app.commandLine.appendSwitch('overscroll-history-navigation', '1');
 } catch (e) {
   // no-op
 }
@@ -355,7 +357,7 @@ function createWindow() {
   // macOS: two-finger swipe gestures for back/forward
   mainWindow.on('swipe', (event, direction) => {
     try {
-  console.log('Main swipe gesture:', direction);
+  console.log('[Gesture][MainWindow] swipe:', direction);
       mainWindow.webContents.send('gesture-swipe', { direction });
     } catch (e) {
       console.warn('Failed to propagate swipe gesture:', e);
@@ -367,7 +369,7 @@ function createWindow() {
     mainWindow.webContents.on('wheel', (_ev, deltaX, deltaY, deltaZ) => {
       // Only consider horizontal gesture
       if (Math.abs(deltaX) > Math.abs(deltaY)) {
-        processWheelForSwipe(mainWindow.webContents, 'main', deltaX);
+  processWheelForSwipe(mainWindow.webContents, 'main', deltaX);
       }
     });
   } catch {}

@@ -11,6 +11,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [showAddTile, setShowAddTile] = useState(false);
   const [tileForm, setTileForm] = useState({ title: '', url: '' });
   const partitionNameRef = useRef('webview');
+  const [wvPreload, setWvPreload] = useState('');
 
   // Decide partition once per window for private browsing
   useEffect(() => {
@@ -22,6 +23,13 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
         }
         partitionNameRef.current = window.__nebulaPrivatePartition;
       }
+      // Resolve webview preload path once on mount
+      try {
+        const p = window.electronAPI?.getWebviewPreloadPath?.();
+        if (p && typeof p === 'string' && p.startsWith('file:')) {
+          setWvPreload(p);
+        }
+      } catch {}
     } catch {}
   }, []);
 
@@ -221,7 +229,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       }
     };
 
-    // Add event listeners
+  // Add event listeners
     webview.addEventListener('dom-ready', handleDomReady);
     webview.addEventListener('did-start-loading', handleLoadStart);
     webview.addEventListener('did-stop-loading', handleLoadStop);
@@ -233,12 +241,71 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     webview.addEventListener('page-favicon-updated', handleFaviconUpdated);
     webview.addEventListener('permissionrequest', handlePermissionRequest);
 
+    // Trackpad horizontal swipe synthesis (renderer-side fallback)
+  let wheelAccum = 0;
+  let wheelCooldownUntil = 0;
+  const wheelThreshold = 150; // more sensitive
+  const wheelCooldownMs = 350;
+    const handleWheel = (e) => {
+      try {
+        // Only consider horizontal gestures
+        const absX = Math.abs(e.deltaX);
+        const absY = Math.abs(e.deltaY);
+        if (absX <= absY) return;
+        const now = performance.now ? performance.now() : Date.now();
+        if (now < wheelCooldownUntil) return;
+        wheelAccum += e.deltaX;
+        if (wheelAccum >= wheelThreshold) {
+          wheelAccum = 0;
+          wheelCooldownUntil = now + wheelCooldownMs;
+          // swipe right -> back
+          try { if (webview.canGoBack && webview.canGoBack()) webview.goBack(); } catch {}
+        } else if (wheelAccum <= -wheelThreshold) {
+          wheelAccum = 0;
+          wheelCooldownUntil = now + wheelCooldownMs;
+          // swipe left -> forward
+          try { if (webview.canGoForward && webview.canGoForward()) webview.goForward(); } catch {}
+        }
+      } catch {}
+    };
+    webview.addEventListener('wheel', handleWheel, { passive: true });
+
     // Security: Add console message handler for debugging
     webview.addEventListener('console-message', (e) => {
       if (process.env.NODE_ENV === 'development' && e.level >= 2) {
         console.log('WebView console:', e.message);
       }
     });
+
+    // Listen for ipc messages sent from guest preload via ipcRenderer.sendToHost
+    const handleIpcMessage = (e) => {
+      try {
+        if (e?.channel === 'nebula-swipe') {
+          const dir = (e?.args && e.args[0]) || '';
+          if (dir === 'right') {
+            try { if (webview.canGoBack && webview.canGoBack()) webview.goBack(); } catch {}
+          } else if (dir === 'left') {
+            try { if (webview.canGoForward && webview.canGoForward()) webview.goForward(); } catch {}
+          }
+        }
+      } catch {}
+    };
+    try { webview.addEventListener('ipc-message', handleIpcMessage); } catch {}
+
+    // Receive synthesized swipe messages from the guest page's preload via postMessage
+    const handleMessage = (event) => {
+      try {
+        const data = event?.data || {};
+        if (data && data.__nebulaSwipe === 'right') {
+          // right -> back
+          try { if (webview.canGoBack && webview.canGoBack()) webview.goBack(); } catch {}
+        } else if (data && data.__nebulaSwipe === 'left') {
+          // left -> forward
+          try { if (webview.canGoForward && webview.canGoForward()) webview.goForward(); } catch {}
+        }
+      } catch {}
+    };
+    window.addEventListener('message', handleMessage);
 
     // Load timeout
     const loadTimeout = setTimeout(() => {
@@ -263,7 +330,10 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       webview.removeEventListener('did-navigate', handleNavigation);
       webview.removeEventListener('did-navigate-in-page', handleNavigation);
       webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
-      webview.removeEventListener('permissionrequest', handlePermissionRequest);
+  webview.removeEventListener('permissionrequest', handlePermissionRequest);
+  try { webview.removeEventListener('ipc-message', handleIpcMessage); } catch {}
+  window.removeEventListener('message', handleMessage);
+  webview.removeEventListener('wheel', handleWheel);
     };
   }, [url]);
 
@@ -286,7 +356,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     <div className="webview-container">
       {/* Spinner overlay removed: progress now shown as a slim bar in the navigation area */}
       
-      {!url || url === 'about:blank' ? (
+  {!url || url === 'about:blank' ? (
         <div className="start-page" style={{
           backgroundImage: settings?.homeWallpaper ? `url('${settings.homeWallpaper}')` : 'none',
           backgroundSize: 'cover', backgroundPosition: 'center',
@@ -358,6 +428,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           )}
         </div>
       ) : (
+        wvPreload ? (
         <webview
           ref={webviewRef}
           src={url}
@@ -375,7 +446,11 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           partition={partitionNameRef.current}
           // Enable experimental web platform features
           experimentalfeatures="false"
-        />
+          // Dedicated guest preload for gesture detection; must be a file:// URL
+          preload={wvPreload}
+        />) : (
+          <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>Loading…</div>
+        )
       )}
       
       <FindInPage

@@ -203,13 +203,11 @@ const BrowserInterface = ({
     const handler = (_e, data) => {
       try {
         const dir = (data?.direction || '').toLowerCase();
-        if (dir === 'left') {
-          // macOS: swipe left -> go back
-          console.log('[Gesture] swipe left -> back');
+        if (dir === 'right') {
+          // macOS: swipe right -> back
           navFnsRef.current?.goBack?.();
-        } else if (dir === 'right') {
-          // macOS: swipe right -> go forward
-          console.log('[Gesture] swipe right -> forward');
+        } else if (dir === 'left') {
+          // macOS: swipe left -> forward
           navFnsRef.current?.goForward?.();
         }
       } catch {}

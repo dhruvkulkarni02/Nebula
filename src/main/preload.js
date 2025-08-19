@@ -100,4 +100,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Back-compat: direct remove if the same handler function reference was passed
   removeShortcutListener: (callback) => ipcRenderer.removeListener('shortcut', callback),
+
+  // WebView preload path (absolute)
+  getWebviewPreloadPath: () => {
+    try {
+      // Return a file:// URL; <webview preload> only accepts file URLs
+      const dir = String(__dirname || '').replace(/\\/g, '/');
+      return 'file://' + dir + '/webview-preload.js';
+    } catch {
+      return '';
+    }
+  },
 });
