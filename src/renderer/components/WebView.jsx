@@ -2,12 +2,26 @@ import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
 import '../styles/WebView.css';
 
-const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable }) => {
+const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable }) => {
   const webviewRef = useRef(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showFind, setShowFind] = useState(false);
+  const partitionNameRef = useRef('webview');
+
+  // Decide partition once per window for private browsing
+  useEffect(() => {
+    try {
+      const isPrivate = !!window.electronAPI?.isPrivateWindow?.();
+      if (isPrivate) {
+        if (!window.__nebulaPrivatePartition) {
+          window.__nebulaPrivatePartition = 'private-webview-' + Date.now();
+        }
+        partitionNameRef.current = window.__nebulaPrivatePartition;
+      }
+    } catch {}
+  }, []);
 
   // Keep latest callback props in refs so listener effect doesn't depend on changing identities
   const onUrlChangeRef = useRef(onUrlChange);
@@ -81,6 +95,71 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     }
   }, [onAudioAvailable]);
 
+  // Provide overlay blocker utility to parent (once)
+  const onOverlayToolsAvailableRef = useRef(onOverlayToolsAvailable);
+  useEffect(() => { onOverlayToolsAvailableRef.current = onOverlayToolsAvailable; }, [onOverlayToolsAvailable]);
+  useEffect(() => {
+    if (exposedOnceRef.current.overlay) return;
+    if (!onOverlayToolsAvailableRef.current) return;
+    const killOverlays = async () => {
+      try {
+        const webview = webviewRef.current;
+        if (!webview || !webview.executeJavaScript) return { error: 'webview not ready' };
+        const script = `(() => {
+          try {
+            const removed = [];
+            const selectors = [
+              '[aria-modal="true"]', '[role="dialog"]', '[role="alertdialog"]',
+              '.modal', '.overlay', '.backdrop', '.cookie', '.cookies', '.consent', '.gdpr', '.newsletter', '.subscribe', '.paywall', '.popup', '.interstitial',
+              '#cookie', '#cookies', '#consent', '#gdpr'
+            ];
+            selectors.forEach(sel => document.querySelectorAll(sel).forEach(el => {
+              el.style.setProperty('display','none','important');
+              el.style.setProperty('visibility','hidden','important');
+              el.style.setProperty('pointer-events','none','important');
+              removed.push(el.tagName+':'+(el.id||el.className));
+            }));
+            const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+            const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+            const minArea = vw*vh*0.2;
+            Array.from(document.querySelectorAll('body *')).forEach(el => {
+              const cs = getComputedStyle(el);
+              if (cs.position === 'fixed' || cs.position === 'sticky') {
+                const rect = el.getBoundingClientRect();
+                const area = Math.max(0, rect.width)*Math.max(0, rect.height);
+                if (area > minArea && rect.top < 50) {
+                   el.style.setProperty('display','none','important');
+                   el.style.setProperty('visibility','hidden','important');
+                   el.style.setProperty('pointer-events','none','important');
+                   removed.push('fixed:'+(el.id||el.className));
+                }
+              }
+            });
+            ['html','body'].forEach(tag => {
+              const el = document.querySelector(tag);
+              if (el) {
+                el.style.setProperty('overflow','auto','important');
+                el.style.removeProperty('position');
+                el.style.removeProperty('height');
+              }
+            });
+            document.querySelectorAll('[style*="backdrop-filter"],[class*="backdrop"],[class*="dim"]').forEach(el => {
+              el.style.removeProperty('backdrop-filter');
+              el.style.background = 'transparent';
+            });
+            return {removedCount: removed.length};
+          } catch(e) { return {error: String(e)}; }
+        })();`;
+        const res = await webview.executeJavaScript(script, true);
+        return res;
+      } catch (e) {
+        return { error: e?.message || String(e) };
+      }
+    };
+    onOverlayToolsAvailableRef.current({ killOverlays });
+    exposedOnceRef.current.overlay = true;
+  }, []);
+
   useEffect(() => {
     // Only set up event listeners if we have a valid URL and webview element
     if (!url || url === 'about:blank' || !webviewRef.current) {
@@ -88,7 +167,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       return;
     }
 
-  const webview = webviewRef.current;
+    const webview = webviewRef.current;
 
     // Reset error state when URL changes
     setHasError(false);
@@ -96,15 +175,16 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     setLoadProgress(0);
 
     // Handle navigation events
-  const handleNavigation = async () => {
+    const handleNavigation = async () => {
       try {
         const currentUrl = webview.getURL();
         const title = webview.getTitle();
         console.log('Navigation:', currentUrl, title);
-    onUrlChangeRef.current && onUrlChangeRef.current(currentUrl, title);
-        
-        // Add to history
-        if (window.electronAPI && currentUrl && currentUrl !== 'about:blank') {
+        onUrlChangeRef.current && onUrlChangeRef.current(currentUrl, title);
+
+        // Add to history (skip for private windows)
+        const isPrivate = !!window.electronAPI?.isPrivateWindow?.();
+        if (window.electronAPI && currentUrl && currentUrl !== 'about:blank' && !isPrivate) {
           await window.electronAPI.addToHistory(currentUrl, title);
         }
       } catch (error) {
@@ -116,6 +196,8 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       console.log('Page loaded successfully');
       handleNavigation();
       setLoadProgress(100);
+      try { onProgressChange && onProgressChange(100); } catch {}
+      try { onLoadingChange && onLoadingChange(false); } catch {}
       setHasError(false);
     };
 
@@ -131,22 +213,34 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     const handleLoadStart = () => {
       console.log('Load started');
       setLoadProgress(10);
+      try { onProgressChange && onProgressChange(10); } catch {}
+      try { onLoadingChange && onLoadingChange(true); } catch {}
       setHasError(false);
     };
 
     const handleLoadStop = () => {
       console.log('Load stopped');
       setLoadProgress(100);
+      try { onProgressChange && onProgressChange(100); } catch {}
+      try { onLoadingChange && onLoadingChange(false); } catch {}
     };
 
     const handleFailLoad = (event) => {
       const code = event?.errorCode;
       const desc = event?.errorDescription || 'Unknown error';
       const vurl = event?.validatedURL || url;
-      console.error('WebView load failed:', { code, desc, url: vurl });
+      const isMain = !!event?.isMainFrame;
+      console.error('WebView load failed:', { code, desc, url: vurl, isMain });
+      // Ignore subframe/resource failures (e.g., ad/tracker blocks) and benign aborts
+      const benignCodes = new Set([-3, -27]); // ERR_ABORTED, ERR_BLOCKED_BY_RESPONSE
+      if (!isMain || benignCodes.has(code)) {
+        return;
+      }
       setHasError(true);
       setErrorMessage(`Failed to load (${code}): ${desc}`);
       setLoadProgress(0);
+      try { onProgressChange && onProgressChange(0); } catch {}
+      try { onLoadingChange && onLoadingChange(false); } catch {}
     };
 
     // Wait for webview to be ready
@@ -213,7 +307,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       webview.removeEventListener('did-navigate', handleNavigation);
       webview.removeEventListener('did-navigate-in-page', handleNavigation);
       webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
-  webview.removeEventListener('permissionrequest', handlePermissionRequest);
+      webview.removeEventListener('permissionrequest', handlePermissionRequest);
     };
   }, [url]);
 
@@ -234,12 +328,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
 
   return (
     <div className="webview-container">
-      {loadProgress > 0 && loadProgress < 100 && url && url !== 'about:blank' && (
-        <div className="loading-overlay">
-          <div className="loading-spinner"></div>
-          <div className="loading-text">Loading... {Math.round(loadProgress)}%</div>
-        </div>
-      )}
+      {/* Spinner overlay removed: progress now shown as a slim bar in the navigation area */}
       
       {!url || url === 'about:blank' ? (
         <div className="start-page">
@@ -262,16 +351,17 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           className="webview"
           // Security settings - balance security with compatibility
           nodeintegration="false"
-          webpreferences="contextIsolation=true,enableRemoteModule=false,sandbox=false"
-          allowpopups
-          // Enable JavaScript and modern web features
-          plugins="true"
+          webpreferences="contextIsolation=true,enableRemoteModule=false,sandbox=true,allowRunningInsecureContent=false,experimentalFeatures=false,disableBlinkFeatures=IdleDetection"
+          // Disallow popups by default; they can be handled via target=_blank navigations
+          // allowpopups
+          // Disable legacy plugins (Pepper/Flash)
+          plugins="false"
           // Updated user agent for better compatibility with modern websites
           useragent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
           // Partition for session management
-          partition="webview"
+          partition={partitionNameRef.current}
           // Enable experimental web platform features
-          experimentalfeatures="true"
+          experimentalfeatures="false"
         />
       )}
       

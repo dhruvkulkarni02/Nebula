@@ -6,6 +6,8 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   const [defaultSearchEngine, setDefaultSearchEngine] = useState('google');
   const [enableOnlineSuggestions, setEnableOnlineSuggestions] = useState(true);
   const [showBookmarksBarDefault, setShowBookmarksBarDefault] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [enableAdBlocker, setEnableAdBlocker] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -16,7 +18,9 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
         if (!mounted) return;
         setDefaultSearchEngine(s.defaultSearchEngine || 'google');
         setEnableOnlineSuggestions(s.enableOnlineSuggestions !== false); // default true
-        setShowBookmarksBarDefault(!!s.showBookmarksBarDefault);
+  setShowBookmarksBarDefault(!!s.showBookmarksBarDefault);
+  setReduceMotion(!!s.reduceMotion);
+  setEnableAdBlocker(!!s.enableAdBlocker);
       } catch {}
       setLoading(false);
     })();
@@ -24,7 +28,7 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   }, [isOpen]);
 
   const handleSave = async () => {
-    const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault };
+  const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker };
     try {
       const res = await window.electronAPI?.updateSettings?.(payload);
       if (res?.success) {
@@ -71,6 +75,17 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
               </label>
             </div>
 
+              <div className="setting-item">
+                <label className="setting-check">
+                  <input
+                    type="checkbox"
+                    checked={enableAdBlocker}
+                    onChange={(e) => setEnableAdBlocker(e.target.checked)}
+                  />
+                  Enable ad & tracker blocking (beta)
+                </label>
+              </div>
+
             <div className="setting-item">
               <label className="setting-check">
                 <input
@@ -79,6 +94,21 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
                   onChange={(e) => setShowBookmarksBarDefault(e.target.checked)}
                 />
                 Show bookmarks bar by default
+              </label>
+            </div>
+
+            <div className="setting-item">
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={reduceMotion}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setReduceMotion(next);
+                    try { document.documentElement.setAttribute('data-reduce-motion', next ? 'true' : 'false'); } catch {}
+                  }}
+                />
+                Reduce motion (fewer animations)
               </label>
             </div>
           </div>

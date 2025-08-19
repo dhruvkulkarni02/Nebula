@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportBookmarks: () => ipcRenderer.invoke('export-bookmarks'),
   importBookmarksFromPath: (filePath) => ipcRenderer.invoke('import-bookmarks', filePath),
   importBookmarksData: (bookmarksArray) => ipcRenderer.invoke('import-bookmarks-data', bookmarksArray),
+  updateBookmarkMeta: (url, meta) => ipcRenderer.invoke('update-bookmark-meta', url, meta),
+  dedupeBookmarks: () => ipcRenderer.invoke('dedupe-bookmarks'),
 
   // History
   getHistory: () => ipcRenderer.invoke('get-history'),
@@ -38,6 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openDownloadLocation: (filePath) => ipcRenderer.invoke('open-download-location', filePath),
   openDownload: (filePath) => ipcRenderer.invoke('open-download', filePath),
   deleteDownloadFile: (filePath) => ipcRenderer.invoke('delete-download-file', filePath),
+  showDownloadInFolder: (filePath) => ipcRenderer.invoke('open-download-location', filePath),
 
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
@@ -45,16 +48,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Privacy
   clearBrowsingData: (options) => ipcRenderer.invoke('clear-browsing-data', options),
+  isPrivateWindow: () => {
+    try {
+      const params = new URLSearchParams(location.search || '');
+      return params.get('private') === '1';
+    } catch {
+      return false;
+    }
+  },
+  openPrivateWindow: () => ipcRenderer.invoke('open-private-window'),
+  getAdblockStats: () => ipcRenderer.invoke('get-adblock-stats'),
+  resetAdblockStats: () => ipcRenderer.invoke('reset-adblock-stats'),
+  toggleAdblockForSite: (hostname, enabled) => ipcRenderer.invoke('toggle-adblock-for-site', { hostname, enabled }),
+
+  // Site permissions
+  getSitePermissions: (origin) => ipcRenderer.invoke('get-site-permissions', origin),
+  setSitePermission: (origin, permission, value) => ipcRenderer.invoke('set-site-permission', { origin, permission, value }),
+
+  // Suggestions (fetched in main to avoid CORS)
+  getSuggestions: (query, engine) => ipcRenderer.invoke('get-suggestions', { query, engine }),
 
   // Event listeners for BrowserView
   onNavigation: (callback) => ipcRenderer.on('navigation-changed', callback),
   onLoadingState: (callback) => ipcRenderer.on('loading-state-changed', callback),
   onLoadError: (callback) => ipcRenderer.on('load-error', callback),
+  onDownloadStarted: (callback) => ipcRenderer.on('download-started', (_e, data) => callback(_e, data)),
+  onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (_e, data) => callback(_e, data)),
+  onDownloadComplete: (callback) => ipcRenderer.on('download-complete', (_e, data) => callback(_e, data)),
 
   // Remove listeners
   removeNavigationListener: (callback) => ipcRenderer.removeListener('navigation-changed', callback),
   removeLoadingStateListener: (callback) => ipcRenderer.removeListener('loading-state-changed', callback),
   removeLoadErrorListener: (callback) => ipcRenderer.removeListener('load-error', callback),
+  removeDownloadStartedListener: (callback) => ipcRenderer.removeListener('download-started', callback),
+  removeDownloadProgressListener: (callback) => ipcRenderer.removeListener('download-progress', callback),
+  removeDownloadCompleteListener: (callback) => ipcRenderer.removeListener('download-complete', callback),
 
   // Gestures
   onSwipeGesture: (callback) => ipcRenderer.on('gesture-swipe', (_e, data) => callback(_e, data)),

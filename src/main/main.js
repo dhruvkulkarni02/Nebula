@@ -5,6 +5,31 @@ const fs = require('fs');
 // Keep a global reference of the window object
 let mainWindow;
 let currentBrowserView;
+// Simple content blocking state and helpers
+let adBlockEnabled = false;
+let adBlockStats = { blocked: 0, allowed: 0 };
+let adBlockAllowlist = new Set(); // hostnames for which blocking is disabled
+const AD_HOST_SUFFIXES = [
+  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google-analytics.com',
+  'g.doubleclick.net', 'adservice.google.com', 'facebook.net', 'connect.facebook.net', 'fbcdn.net',
+  'ads.twitter.com', 'static.ads-twitter.com', 'analytics.twitter.com', 'ads.linkedin.com',
+  'px.ads.linkedin.com', 'ads.reddit.com', 'taboola.com', 'outbrain.com', 'zemanta.com', 'criteo.com',
+  'criteo.net', 'scorecardresearch.com', 'quantserve.com', 'quantcount.com', 'adroll.com', 'segment.com',
+  'mixpanel.com', 'mathtag.com', 'yieldmo.com', 'pubmatic.com', 'rubiconproject.com', 'openx.net', 'rfihub.com',
+  'moatads.com'
+];
+function hostnameFromUrl(u) { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } }
+function hostMatchesSuffix(host, suffix) {
+  return host === suffix || host.endsWith('.' + suffix) || (suffix.endsWith('.*') && host.endsWith('.' + suffix.slice(0, -2)));
+}
+function shouldBlockUrl(u) {
+  const h = hostnameFromUrl(u);
+  if (!h) return false;
+  for (const suf of AD_HOST_SUFFIXES) {
+    if (hostMatchesSuffix(h, suf)) return true;
+  }
+  return false;
+}
 
 // Development mode detection
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -13,6 +38,8 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 // Note: This relaxes Chromium's autoplay policy for smoother video playback
 try {
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+  // Privacy: Reduce WebRTC IP leak exposure
+  app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'disable_non_proxied_udp');
 } catch (e) {
   // no-op
 }
@@ -145,8 +172,8 @@ function createWindow() {
   mainWindow.on('resize', () => {
     try {
       if (currentBrowserView) {
-        const bounds = mainWindow.getBounds();
-        const navigationHeight = 120;
+  const bounds = mainWindow.getBounds();
+  const navigationHeight = 88;
         currentBrowserView.setBounds({
           x: 0,
           y: navigationHeight,
@@ -173,9 +200,29 @@ function configureSessionSecurity() {
   try {
     const ses = session.defaultSession;
 
-    // Security: Set secure defaults with better website compatibility
+    // Initialize ad blocker state from settings
+    try {
+      const s = (typeof loadSettings === 'function') ? loadSettings() : {};
+      adBlockEnabled = !!s.enableAdBlocker;
+      adBlockAllowlist = new Set((s.adBlockAllowlist || []).map(h => String(h || '').toLowerCase()).filter(Boolean));
+    } catch {}
+
+    // Load site permissions from settings
+    let sitePermissions = {};
+    try {
+      const s = (typeof loadSettings === 'function') ? loadSettings() : {};
+      sitePermissions = s.sitePermissions || {};
+    } catch {}
+
+    // Security: Set secure defaults with better website compatibility and per-site overrides
     ses.setPermissionRequestHandler((webContents, permission, callback) => {
-      console.log('Permission request:', permission, 'from', webContents.getType());
+      let fromType = 'unknown';
+      try {
+        if (webContents && !webContents.isDestroyed() && typeof webContents.getType === 'function') {
+          fromType = webContents.getType();
+        }
+      } catch {}
+      console.log('Permission request:', permission, 'from', fromType);
       
       // Allow essential permissions for normal web functionality
       const allowedPermissions = [
@@ -187,14 +234,25 @@ function configureSessionSecurity() {
         'background-sync',
         'fullscreen'
       ];
-      
+
+      // Apply per-origin overrides if available
+      try {
+        const origin = (webContents && typeof webContents.getURL === 'function') ? new URL(webContents.getURL()).origin : '';
+        if (origin && sitePermissions[origin] && Object.prototype.hasOwnProperty.call(sitePermissions[origin], permission)) {
+          const decision = !!sitePermissions[origin][permission];
+          console.log(`Permission ${permission} overridden for ${origin}: ${decision ? 'granted' : 'denied'}`);
+          try { callback(decision); } catch {}
+          return;
+        }
+      } catch {}
+
       const isAllowed = allowedPermissions.includes(permission);
       console.log(`Permission ${permission} ${isAllowed ? 'granted' : 'denied'}`);
-      callback(isAllowed);
+      try { callback(isAllowed); } catch (e) { console.warn('Permission callback failed:', e?.message || e); }
     });
 
-    // Security: Permission check handler
-    ses.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+  // Security: Permission check handler
+  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
       console.log('Permission check:', permission, requestingOrigin);
       
       // Allow essential permissions for web browsing
@@ -213,11 +271,21 @@ function configureSessionSecurity() {
       ];
       
       // For webviews, be more permissive to allow normal web functionality
-      if (webContents.getType() === 'webview') {
+      let isWebview = false;
+      try {
+        isWebview = !!(webContents && !webContents.isDestroyed() && typeof webContents.getType === 'function' && webContents.getType() === 'webview');
+      } catch {}
+      if (isWebview) {
         return allowedPermissions.includes(permission);
       }
       
-      // Main window should be more restrictive
+      // Main window should be more restrictive; include per-origin overrides
+      try {
+        const origin = requestingOrigin || (webContents && typeof webContents.getURL === 'function' ? new URL(webContents.getURL()).origin : '');
+        if (origin && sitePermissions[origin] && Object.prototype.hasOwnProperty.call(sitePermissions[origin], permission)) {
+          return !!sitePermissions[origin][permission];
+        }
+      } catch {}
       return ['clipboard-read', 'clipboard-write'].includes(permission);
     });
 
@@ -228,10 +296,143 @@ function configureSessionSecurity() {
     ses.setPermissionCheckHandler = ses.setPermissionCheckHandler || (() => true);
 
     // Configure webview behavior
+    const BLOCKED_TYPES = new Set(['script', 'image', 'xhr', 'fetch', 'subFrame', 'media', 'beacon', 'ping']);
     ses.webRequest.onBeforeRequest((details, callback) => {
-      // For now, allow all requests - we'll add filtering later
+      try {
+        // HTTPS upgrade for top-level navigations (best-effort), but skip in dev for localhost
+        try {
+          const isMain = details.resourceType === 'mainFrame';
+          const u = new URL(details.url);
+          const isLocalhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.endsWith('.local');
+          if (isMain && u.protocol === 'http:' && !(isDev && isLocalhost)) {
+            u.protocol = 'https:';
+            return callback({ redirectURL: u.toString() });
+          }
+        } catch {}
+
+        // Strip common tracking parameters from URLs
+        try {
+          const u = new URL(details.url);
+          const before = u.toString();
+          const TRACK_PARAMS = new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid','mc_cid','mc_eid','ref','igshid','msclkid']);
+          let changed = false;
+          for (const p of Array.from(u.searchParams.keys())) {
+            if (TRACK_PARAMS.has(p)) { u.searchParams.delete(p); changed = true; }
+          }
+          if (changed) {
+            const after = u.toString();
+            if (after !== before) return callback({ redirectURL: after });
+          }
+        } catch {}
+
+        if (adBlockEnabled && details.resourceType !== 'mainFrame' && BLOCKED_TYPES.has(details.resourceType)) {
+          // Skip blocking if current site is allowlisted
+          const ref = details.referrer || (details.requestHeaders && (details.requestHeaders.Referer || details.requestHeaders.referer)) || '';
+          const refHost = hostnameFromUrl(ref);
+          if (refHost && adBlockAllowlist.has(refHost)) {
+            adBlockStats.allowed++;
+            return callback({});
+          }
+          if (shouldBlockUrl(details.url)) {
+            adBlockStats.blocked++;
+            if (process.env.NODE_ENV === 'development') {
+              try { console.log('[AdBlock] cancelled:', details.url); } catch {}
+            }
+            return callback({ cancel: true });
+          }
+        }
+        adBlockStats.allowed++;
+      } catch {}
       callback({});
     });
+
+    // Add privacy-forward request headers and strip third-party cookies/referrers
+    ses.webRequest.onBeforeSendHeaders((details, callback) => {
+      try {
+        const headers = details.requestHeaders || {};
+        headers['DNT'] = '1'; // Do Not Track
+        headers['Sec-GPC'] = '1'; // Global Privacy Control
+        headers['Accept-Language'] = headers['Accept-Language'] || 'en-US,en;q=0.5';
+
+        // If third-party (request host differs from referrer host), strip cookies and referer
+        const reqHost = hostnameFromUrl(details.url);
+        const ref = headers.Referer || headers.referer || details.referrer || '';
+        const refHost = hostnameFromUrl(ref);
+        if (reqHost && refHost && reqHost !== refHost) {
+          delete headers['Cookie'];
+          delete headers['cookie'];
+          delete headers['Referer'];
+          delete headers['referer'];
+        }
+        callback({ requestHeaders: headers });
+      } catch (e) {
+        callback({});
+      }
+    });
+
+    // Ensure a sane Referrer-Policy for responses when sites omit it
+    ses.webRequest.onHeadersReceived((details, callback) => {
+      try {
+        const responseHeaders = details.responseHeaders || {};
+        const hasPolicy = Object.keys(responseHeaders).some(k => k.toLowerCase() === 'referrer-policy');
+        if (!hasPolicy) {
+          responseHeaders['Referrer-Policy'] = ['strict-origin-when-cross-origin'];
+        }
+        callback({ responseHeaders });
+      } catch (e) {
+        callback({});
+      }
+    });
+
+    // Hook download events to track progress and completion
+    try {
+      ses.on('will-download', (event, item, webContents) => {
+        try {
+          const totalBytes = item.getTotalBytes();
+          const url = item.getURL();
+          const filename = item.getFilename();
+          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const startTime = new Date().toISOString();
+          const base = { id, filename, url, totalBytes, receivedBytes: 0, state: 'progressing', startTime, endTime: null, savePath: item.getSavePath?.() };
+
+          // Persist initial record
+          try {
+            const list = (typeof loadDownloads === 'function') ? loadDownloads() : [];
+            list.push(base);
+            saveDownloads(list);
+          } catch {}
+
+          // Notify renderer
+          try { BrowserWindow.getAllWindows().forEach(w => w.webContents.send('download-started', base)); } catch {}
+
+          item.on('updated', (_evt, state) => {
+            try {
+              const receivedBytes = item.getReceivedBytes();
+              const progress = { id, receivedBytes, state: state || 'progressing' };
+              BrowserWindow.getAllWindows().forEach(w => w.webContents.send('download-progress', progress));
+            } catch {}
+          });
+
+          item.on('done', (_evt, state) => {
+            try {
+              const endTime = new Date().toISOString();
+              const savePath = item.getSavePath?.();
+              const final = { id, state, endTime, savePath };
+              // Update persisted record
+              try {
+                const list = loadDownloads();
+                const idx = list.findIndex(d => d.id === id);
+                if (idx >= 0) list[idx] = { ...list[idx], ...final };
+                saveDownloads(list);
+              } catch {}
+              BrowserWindow.getAllWindows().forEach(w => w.webContents.send('download-complete', { id, state, endTime, savePath }));
+            } catch {}
+          });
+        } catch (e) {
+          console.warn('Download hook error:', e?.message || e);
+        }
+      });
+    } catch {}
 
     // Privacy: Clear cache on startup in development
     if (process.env.NODE_ENV === 'development') {
@@ -270,8 +471,8 @@ async function createBrowserView(url) {
     mainWindow.setBrowserView(currentBrowserView);
     
     // Calculate position (below the navigation bar)
-    const bounds = mainWindow.getBounds();
-    const navigationHeight = 120; // Height for navigation + tabs
+  const bounds = mainWindow.getBounds();
+  const navigationHeight = 88; // Height for navigation + tabs (slimmer navbar)
     
     currentBrowserView.setBounds({
       x: 0,
@@ -435,6 +636,47 @@ function setupIpcHandlers() {
     } catch (error) {
       console.error('Error getting bookmarks:', error);
       return [];
+    }
+  });
+
+  // Update bookmark metadata (tags, note, color, pinned, etc.)
+  ipcMain.handle('update-bookmark-meta', async (event, url, meta) => {
+    try {
+      const bookmarks = loadBookmarks();
+      const idx = bookmarks.findIndex(b => b.url === url);
+      if (idx === -1) return { success: false, error: 'Bookmark not found' };
+      const original = bookmarks[idx] || {};
+      const allowed = ['tags', 'note', 'color', 'pinned', 'title'];
+      const patch = {};
+      for (const k of allowed) {
+        if (Object.prototype.hasOwnProperty.call(meta || {}, k)) patch[k] = meta[k];
+      }
+      bookmarks[idx] = { ...original, ...patch };
+      const success = saveBookmarks(bookmarks);
+      return { success };
+    } catch (e) {
+      console.error('Error updating bookmark meta:', e);
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
+  // Remove duplicate bookmarks (by URL)
+  ipcMain.handle('dedupe-bookmarks', async () => {
+    try {
+      const bookmarks = loadBookmarks();
+      const seen = new Set();
+      const deduped = [];
+      for (const b of bookmarks) {
+        const key = (b.url || '').trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(b);
+      }
+      const success = saveBookmarks(deduped);
+      return { success, removed: bookmarks.length - deduped.length };
+    } catch (e) {
+      console.error('Error deduping bookmarks:', e);
+      return { success: false, error: e?.message || String(e) };
     }
   });
 
@@ -688,7 +930,37 @@ function setupIpcHandlers() {
     const current = loadSettings();
     const updated = { ...current, ...(partial || {}) };
     const ok = saveSettings(updated);
+    if (Object.prototype.hasOwnProperty.call(updated, 'enableAdBlocker')) {
+      adBlockEnabled = !!updated.enableAdBlocker;
+      console.log('Ad blocker now', adBlockEnabled ? 'ENABLED' : 'DISABLED');
+    }
     return { success: ok, settings: updated };
+  });
+
+  // Site permissions get/set
+  ipcMain.handle('get-site-permissions', async (event, origin) => {
+    try {
+      const s = loadSettings();
+      const map = s.sitePermissions || {};
+      return { success: true, permissions: map[origin] || {} };
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
+  ipcMain.handle('set-site-permission', async (event, payload) => {
+    try {
+      const { origin, permission, value } = payload || {};
+      if (!origin || !permission) return { success: false, error: 'origin and permission required' };
+      const s = loadSettings();
+      const map = s.sitePermissions || {};
+      map[origin] = map[origin] || {};
+      map[origin][permission] = !!value;
+      const ok = saveSettings({ ...s, sitePermissions: map });
+      return { success: ok };
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) };
+    }
   });
 
   // Back-compat simple handlers
@@ -709,14 +981,167 @@ function setupIpcHandlers() {
     return { success: true };
   });
 
+  ipcMain.handle('open-private-window', async () => {
+    try {
+      const win = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        minWidth: 800,
+        minHeight: 600,
+        title: 'NebulaBrowser — Private',
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          enableRemoteModule: false,
+          preload: path.join(__dirname, 'preload.js'),
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+          experimentalFeatures: false,
+          webviewTag: true,
+          partition: 'private:' + Date.now()
+        }
+      });
+      await win.loadURL(isDev ? 'http://localhost:3000/?private=1' : 'file://' + path.join(__dirname, '../../build/index.html?private=1'));
+      try {
+        // Clear storage/cookies/cache on close for the private session
+        win.on('closed', async () => {
+          try {
+            const ps = win.webContents.session;
+            await ps.clearStorageData();
+            await ps.clearCache();
+            const cookies = await ps.cookies.get({});
+            for (const c of cookies) {
+              try { await ps.cookies.remove((c.secure ? 'https://' : 'http://') + c.domain.replace(/^[.]/, '') + (c.path || '/'), c.name); } catch {}
+            }
+          } catch {}
+        });
+      } catch {}
+      return { success: true };
+    } catch (e) {
+      console.error('Failed to open private window:', e);
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
   ipcMain.handle('toggle-ad-blocker', async (event, enabled) => {
     console.log('Toggle ad blocker request:', enabled);
-    return { success: true };
+  adBlockEnabled = !!enabled;
+  return { success: true, enabled: adBlockEnabled };
   });
 
   ipcMain.handle('clear-browsing-data', async (event, options) => {
     console.log('Clear browsing data request:', options);
     return { success: true };
+  });
+
+  ipcMain.handle('get-adblock-stats', async () => {
+    return { ...adBlockStats };
+  });
+
+  ipcMain.handle('reset-adblock-stats', async () => {
+    adBlockStats = { blocked: 0, allowed: 0 };
+    return { ...adBlockStats };
+  });
+
+  ipcMain.handle('toggle-adblock-for-site', async (event, payload) => {
+    try {
+      const { hostname, enabled } = payload || {};
+      const host = String(hostname || '').toLowerCase();
+      if (!host) return { success: false, error: 'No hostname' };
+      if (enabled === false) adBlockAllowlist.add(host); else adBlockAllowlist.delete(host);
+      // Persist allowlist to settings
+      const cur = loadSettings();
+      const list = Array.from(adBlockAllowlist.values());
+      saveSettings({ ...cur, adBlockAllowlist: list });
+      return { success: true, allowlisted: enabled === false };
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
+  // Query suggestions fetched in main to avoid CORS in renderer
+  ipcMain.handle('get-suggestions', async (_event, payload) => {
+    try {
+      const { query, engine } = payload || {};
+      const q = String(query || '').trim();
+      if (!q) return [];
+      const eng = String((engine || 'google')).toLowerCase();
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 4000);
+      const headers = { 'Accept': 'application/json, text/plain, */*', 'User-Agent': session.defaultSession.getUserAgent() };
+      let url;
+      if (eng === 'duckduckgo') {
+        url = `https://duckduckgo.com/ac/?q=${encodeURIComponent(q)}&type=list`;
+      } else if (eng === 'brave') {
+        url = `https://search.brave.com/api/suggest?q=${encodeURIComponent(q)}`;
+      } else {
+        url = `https://suggestqueries.google.com/complete/search?client=chrome&q=${encodeURIComponent(q)}`;
+      }
+      const resp = await fetch(url, { signal: controller.signal, headers });
+      clearTimeout(t);
+      if (!resp.ok) return [];
+      const ct = resp.headers.get('content-type') || '';
+      let data;
+      if (ct.includes('application/json')) data = await resp.json();
+      else data = await resp.json().catch(async () => { try { return JSON.parse(await resp.text()); } catch { return null; } });
+  let phrases = [];
+      if (eng === 'duckduckgo') {
+        if (Array.isArray(data)) {
+          // Newer/observed DDG shape: [ queryString, [suggestions...] ]
+          if (Array.isArray(data[1])) {
+            phrases = data[1].map(String);
+          } else if (data.length && typeof data[0] === 'object' && data[0] && 'phrase' in data[0]) {
+            // Alternate DDG shape: [{ phrase: "..." }, ...]
+            phrases = data.map(x => x?.phrase || '').filter(Boolean);
+          } else {
+            // Fallback: coerce items to strings
+            phrases = data.map(String).filter(Boolean);
+          }
+        } else if (data && (Array.isArray(data.suggestions) || Array.isArray(data.results))) {
+          // Fallback shape sometimes seen
+          const arr = (data.suggestions || data.results || []).map(x => (typeof x === 'string' ? x : x?.phrase || x?.value || ''));
+          phrases = arr.filter(Boolean);
+        } else if (typeof data === 'string') {
+          // Last-ditch: string payload; split by separators
+          phrases = String(data).split(/[\n\r,\u2022\u2023\u25E6\u2043\u2219]+/).map(s => s.trim()).filter(Boolean);
+        } else {
+          phrases = [];
+        }
+        // Dev logging to diagnose response shape issues (only in development)
+        if (process.env.NODE_ENV === 'development') {
+          try {
+            const preview = JSON.stringify(data)?.slice(0, 300);
+            console.log('[Suggestions][DDG] raw:', typeof data, Array.isArray(data) ? `array(len=${data.length})` : 'object', preview);
+            console.log('[Suggestions][DDG] parsed phrases:', phrases.slice(0, 10));
+          } catch {}
+        }
+       } else if (eng === 'brave') {
+        if (Array.isArray(data)) {
+          const arr = Array.isArray(data[1]) ? data[1] : [];
+          phrases = arr.map(String);
+        } else if (data && (Array.isArray(data.suggestions) || Array.isArray(data.results))) {
+          const arr = (data.suggestions || data.results || []).map(x => (typeof x === 'string' ? x : x?.phrase || x?.value || ''));
+          phrases = arr.filter(Boolean);
+        }
+      } else {
+        // google
+        phrases = Array.isArray(data) && Array.isArray(data[1]) ? data[1].map(String) : [];
+      }
+      const uniq = [];
+      const seen = new Set();
+      const qLower = q.toLowerCase();
+      for (const p of phrases) {
+        const s = String(p || '').trim();
+        if (!s || seen.has(s)) continue;
+        if (s.toLowerCase() === qLower) continue; // ignore exact query echo
+        seen.add(s);
+        uniq.push(s);
+        if (uniq.length >= 10) break;
+      }
+      return uniq;
+    } catch (e) {
+      return [];
+    }
   });
 
   // Bookmarks import/export (Phase 2: organization groundwork)

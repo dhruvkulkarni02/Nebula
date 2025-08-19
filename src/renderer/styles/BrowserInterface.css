@@ -32,7 +32,13 @@
   max-width: 240px;
   min-width: 120px;
   position: relative;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: tabPopIn 160ms ease-out;
+}
+
+@keyframes tabPopIn {
+  from { transform: translateY(2px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
 .tab.active {
@@ -230,6 +236,12 @@
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.45);
 }
 
+/* micro interaction when pressing nav/menu buttons */
+.nav-button:active, .menu-button:active, .reload-button:active, .stop-button:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 80ms;
+}
+
 /* Main content area wrapper (WebView lives inside) */
 .content-area {
   flex: 1;
@@ -238,5 +250,56 @@
   position: relative;
   overflow: hidden;
   background: #ffffff;
+}
+
+/* slim progress bar under the navigation bar */
+.top-progress {
+  height: 2px;
+  background: transparent;
+  width: 100%;
+}
+
+.top-progress-inner {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  transition: width 120ms ease;
+}
+
+/* Respect reduced motion via app setting */
+:root[data-reduce-motion="true"] .tab,
+:root[data-reduce-motion="true"] .tab.active,
+:root[data-reduce-motion="true"] .new-tab-btn,
+:root[data-reduce-motion="true"] .nav-button,
+:root[data-reduce-motion="true"] .menu-button,
+:root[data-reduce-motion="true"] .reload-button,
+:root[data-reduce-motion="true"] .stop-button,
+:root[data-reduce-motion="true"] .suggestions,
+:root[data-reduce-motion="true"] .settings-overlay,
+:root[data-reduce-motion="true"] .settings-modal,
+:root[data-reduce-motion="true"] .bookmarks-overlay,
+:root[data-reduce-motion="true"] .bookmarks-panel,
+:root[data-reduce-motion="true"] .top-progress-inner {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Respect user OS reduce-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .tab.active,
+  .new-tab-btn,
+  .nav-button,
+  .menu-button,
+  .reload-button,
+  .stop-button,
+  .suggestions,
+  .settings-overlay,
+  .settings-modal,
+  .bookmarks-overlay,
+  .bookmarks-panel,
+  .top-progress-inner {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
