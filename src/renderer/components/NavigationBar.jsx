@@ -30,6 +30,7 @@ const NavigationBar = ({
   const [isPrivate, setIsPrivate] = useState(false);
   const [showPageInfo, setShowPageInfo] = useState(false);
   const [sitePerms, setSitePerms] = useState({});
+  const [addingHome, setAddingHome] = useState(false);
 
   const inputRef = useRef(null);
   const suggestBoxRef = useRef(null);
@@ -557,6 +558,31 @@ const NavigationBar = ({
         {(settings?.toolbarButtons?.private !== false) && (<button className="menu-button" title="New private window" onClick={() => window.electronAPI?.openPrivateWindow?.()}>🕶️</button>)}
         {(settings?.toolbarButtons?.find !== false) && (<button className="menu-button" title="Find in page (Ctrl+F)" onClick={onOpenFind} disabled={!currentUrl || currentUrl === 'about:blank'}>🔍</button>)}
         {(settings?.toolbarButtons?.downloads !== false) && (<button className="menu-button" title="Downloads" onClick={onShowDownloads}>📥</button>)}
+        {/* Add to Home (start page tile) */}
+        <button
+          className="menu-button"
+          title="Add to Home"
+          disabled={!currentUrl || currentUrl === 'about:blank' || addingHome}
+          onClick={async () => {
+            try {
+              setAddingHome(true);
+              const ensureUrl = (u)=>{ let s=String(u||'').trim(); if(!s) return ''; if(!/^https?:\/\//i.test(s)){ s='https://'+s; } return s; };
+              const u = ensureUrl(currentUrl);
+              if (!u) { setAddingHome(false); return; }
+              let title = document.title || (()=>{ try{ return new URL(u).hostname; }catch{return u; }})();
+              const origin = (()=>{ try{ return new URL(u).origin; }catch{return ''; }})();
+              const icon = origin ? origin + '/favicon.ico' : '';
+              const s = await window.electronAPI?.getSettings?.();
+              const cur = (s?.homeTiles || []);
+              const idx = cur.findIndex(t => (t.url||'').trim() === u);
+              const next = [...cur];
+              if (idx >= 0) next[idx] = { ...next[idx], title, url: u, icon };
+              else next.unshift({ title, url: u, icon });
+              await window.electronAPI?.updateSettings?.({ ...s, homeTiles: next });
+            } catch {}
+            setAddingHome(false);
+          }}
+        >🏷️</button>
       </div>
       <button
         className="menu-button"

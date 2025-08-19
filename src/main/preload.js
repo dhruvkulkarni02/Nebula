@@ -90,4 +90,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Gestures
   onSwipeGesture: (callback) => ipcRenderer.on('gesture-swipe', (_e, data) => callback(_e, data)),
   removeSwipeGestureListener: (callback) => ipcRenderer.removeListener('gesture-swipe', callback),
+
+  // Global shortcuts forwarded from main
+  // Returns an unsubscribe function to correctly remove the specific handler
+  onShortcut: (callback) => {
+    const handler = (_e, data) => callback?.(_e, data);
+    ipcRenderer.on('shortcut', handler);
+    return () => ipcRenderer.removeListener('shortcut', handler);
+  },
+  // Back-compat: direct remove if the same handler function reference was passed
+  removeShortcutListener: (callback) => ipcRenderer.removeListener('shortcut', callback),
 });

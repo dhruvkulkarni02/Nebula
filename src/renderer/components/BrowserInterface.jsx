@@ -36,6 +36,12 @@ const BrowserInterface = ({
   const [editingBookmark, setEditingBookmark] = useState(null); // {url,title,tags,note,color,pinned}
   // overlay cleaner & session map removed per request
   const sessionGraphRef = useRef({}); // tabId -> { nodes: [{id,url,title}], edges: [{from,to}] }
+  // Monotonic tab id generator to ensure unique React keys even under rapid creation
+  const nextTabIdRef = useRef(Date.now());
+  const newTabId = () => {
+    nextTabIdRef.current += 1;
+    return nextTabIdRef.current;
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -152,6 +158,8 @@ const BrowserInterface = ({
   const importInputRef = useRef(null);
   const [tabMenu, setTabMenu] = useState({ open: false, x: 0, y: 0, tabId: null });
   const bookmarksDragIndexRef = useRef(null);
+  const navFnsRef = useRef({ goBack: null, goForward: null, reload: null });
+  const [navState, setNavState] = useState({ canGoBack: false, canGoForward: false });
 
   // Restore last session tabs from localStorage
   useEffect(() => {
@@ -161,7 +169,7 @@ const BrowserInterface = ({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.tabs) && parsed.tabs.length) {
           setTabs(parsed.tabs.map(t => ({
-            id: t.id || Date.now(),
+            id: t.id || newTabId(),
             url: t.url || 'about:blank',
             title: t.title || 'New Tab',
     active: !!t.active,
@@ -190,10 +198,30 @@ const BrowserInterface = ({
       console.warn('Failed to save session tabs:', e);
     }
   }, [tabs, activeTabId]);
+  // Swipe back/forward gesture support (from main via preload)
+  useEffect(() => {
+    const handler = (_e, data) => {
+      try {
+        const dir = (data?.direction || '').toLowerCase();
+        if (dir === 'left') {
+          // macOS: swipe left -> go back
+          console.log('[Gesture] swipe left -> back');
+          navFnsRef.current?.goBack?.();
+        } else if (dir === 'right') {
+          // macOS: swipe right -> go forward
+          console.log('[Gesture] swipe right -> forward');
+          navFnsRef.current?.goForward?.();
+        }
+      } catch {}
+    };
+    try { window.electronAPI?.onSwipeGesture?.(handler); } catch {}
+    return () => { try { window.electronAPI?.removeSwipeGestureListener?.(handler); } catch {} };
+  }, []);
+
 
   const handleNewTab = () => {
     const newTab = {
-      id: Date.now(),
+  id: newTabId(),
       url: 'about:blank',
       title: 'New Tab',
       active: false,
@@ -217,10 +245,11 @@ const BrowserInterface = ({
     const updatedTabs = tabs.filter(tab => tab.id !== tabId);
     
     if (updatedTabs.length === 0) {
-      // If no tabs left, close the browser window
-      if (typeof window !== 'undefined' && window.close) {
-        window.close();
-      }
+      // If no tabs left, keep the window open and create a fresh New Tab instead of closing the window
+      const newTab = { id: newTabId(), url: 'about:blank', title: 'New Tab', active: true, pinned: false };
+      setTabs([ newTab ]);
+      setActiveTabId(newTab.id);
+      onNavigate('about:blank');
       return;
     }
     
@@ -325,7 +354,7 @@ const BrowserInterface = ({
       const idx = prev.findIndex(t => t.id === tabId);
       if (idx === -1) return prev;
       const src = prev[idx];
-      const dup = { ...src, id: Date.now(), active: true };
+  const dup = { ...src, id: newTabId(), active: true };
       const next = prev.map(t => ({ ...t, active: false }));
       next.splice(idx + 1, 0, dup);
       setActiveTabId(dup.id);
@@ -347,96 +376,98 @@ const BrowserInterface = ({
     setActiveTabId(tabId);
   };
 
-  // Quality of life keyboard shortcuts
+  // Keyboard shortcuts are handled globally in main and forwarded via 'onShortcut'.
+  // We intentionally avoid adding a local keydown listener to prevent double-triggering (e.g., Cmd+T opening two tabs).
+
+  // Handle shortcuts forwarded from main (works when webview is focused)
+  const lastShortcutRef = useRef({ action: null, ts: 0 });
   useEffect(() => {
-    const handler = (e) => {
-      const meta = e.metaKey || e.ctrlKey; // support mac and windows
-      // New Tab: Cmd/Ctrl+T
-      if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        handleNewTab();
-        return;
-      }
-      // Close Tab: Cmd/Ctrl+W
-      if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        handleCloseTab(activeTabId);
-        return;
-      }
-      // Focus Address Bar: Cmd/Ctrl+L
-      if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault();
-        window.dispatchEvent(new Event('focus-address-bar'));
-        return;
-      }
-      // Find in Page: Cmd/Ctrl+F
-      if (meta && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        if (openFindFunction) openFindFunction();
-        return;
-      }
-      // Reopen closed tab: Cmd/Ctrl+Shift+T
-      if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        const reopened = closedTabs[0];
-        if (reopened) {
-          setClosedTabs(prev => prev.slice(1));
-          const newId = Date.now();
-          const tab = { ...reopened, id: newId, active: true };
-          setTabs(prev => [...prev.map(t => ({ ...t, active: false })), tab]);
-          setActiveTabId(newId);
-          onNavigate(tab.url || 'about:blank');
+    // Deduplicate identical shortcut actions arriving in a burst (host + webview, or key auto-repeat)
+    const onShortcut = (_e, data) => {
+      try {
+        const a = data?.action;
+        if (!a) return;
+        // Ignore auto-repeats flagged by main
+        if (data?.repeat) return;
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        if (lastShortcutRef.current.action === a && now - lastShortcutRef.current.ts < 250) {
+          return; // drop duplicate within 250ms window
         }
-        return;
-      }
-      // Cycle tabs: Ctrl/Cmd+Tab (next) and Ctrl/Cmd+Shift+Tab (prev)
-      if (meta && e.key === 'Tab') {
-        e.preventDefault();
-        const idx = tabs.findIndex(t => t.id === activeTabId);
-        if (idx === -1) return;
-        const delta = e.shiftKey ? -1 : 1;
-        const nextIdx = (idx + delta + tabs.length) % tabs.length;
-        const nextTab = tabs[nextIdx];
-        handleSwitchTab(nextTab.id);
-        return;
-      }
-      // Switch to tab by number: Cmd/Ctrl+1..8 (nth), 9 (last)
-      if (meta && !e.shiftKey && !e.altKey) {
-        const num = parseInt(e.key, 10);
-        if (!Number.isNaN(num)) {
-          e.preventDefault();
-          const targetIdx = num === 9 ? tabs.length - 1 : Math.max(0, Math.min(num - 1, tabs.length - 1));
-          const target = tabs[targetIdx];
-          if (target) handleSwitchTab(target.id);
-          return;
+        lastShortcutRef.current.action = a;
+        lastShortcutRef.current.ts = now;
+        switch (a) {
+          case 'back':
+            navFnsRef.current?.goBack?.();
+            break;
+          case 'forward':
+            navFnsRef.current?.goForward?.();
+            break;
+          case 'reload':
+            navFnsRef.current?.reload?.();
+            break;
+          case 'reloadHard':
+            // Fallback to soft reload via webview
+            navFnsRef.current?.reload?.();
+            break;
+          case 'newTab':
+            handleNewTab();
+            break;
+          case 'closeTab':
+            handleCloseTab(activeTabId);
+            break;
+          case 'focusOmnibox':
+            window.dispatchEvent(new Event('focus-address-bar'));
+            break;
+          case 'find':
+            openFindFunction && openFindFunction();
+            break;
+          case 'reopenClosedTab': {
+            const reopened = closedTabs[0];
+            if (reopened) {
+              setClosedTabs(prev => prev.slice(1));
+              const newId = newTabId();
+              const tab = { ...reopened, id: newId, active: true };
+              setTabs(prev => [...prev.map(t => ({ ...t, active: false })), tab]);
+              setActiveTabId(newId);
+              onNavigate(tab.url || 'about:blank');
+            }
+            break; }
+          case 'nextTab':
+          case 'prevTab': {
+            const idx = tabs.findIndex(t => t.id === activeTabId);
+            if (idx !== -1) {
+              const delta = a === 'prevTab' ? -1 : 1;
+              const nextIdx = (idx + delta + tabs.length) % tabs.length;
+              const nextTab = tabs[nextIdx];
+              handleSwitchTab(nextTab.id);
+            }
+            break; }
+          case 'nthTab': {
+            const index = Math.max(1, Math.min(9, Number(data?.index || 1)));
+            const targetIdx = index === 9 ? tabs.length - 1 : index - 1;
+            const target = tabs[targetIdx];
+            if (target) handleSwitchTab(target.id);
+            break; }
+          case 'zoomIn':
+            zoomFns.zoomIn && zoomFns.zoomIn();
+            break;
+          case 'zoomOut':
+            zoomFns.zoomOut && zoomFns.zoomOut();
+            break;
+          case 'resetZoom':
+            zoomFns.resetZoom && zoomFns.resetZoom();
+            break;
+          case 'toggleMute':
+            audioFns.toggleMute && audioFns.toggleMute();
+            break;
+          default:
+            break;
         }
-      }
-      // Zoom controls: Cmd/Ctrl + '+', '-', '0'
-      if (meta && !e.shiftKey && !e.altKey) {
-        if (e.key === '=' || e.key === '+') { // zoom in
-          e.preventDefault();
-          zoomFns.zoomIn && zoomFns.zoomIn();
-          return;
-        }
-        if (e.key === '-') { // zoom out
-          e.preventDefault();
-          zoomFns.zoomOut && zoomFns.zoomOut();
-          return;
-        }
-        if (e.key === '0') { // reset zoom
-          e.preventDefault();
-          zoomFns.resetZoom && zoomFns.resetZoom();
-          return;
-        }
-        if (e.key.toLowerCase() === 'm') { // mute/unmute
-          e.preventDefault();
-          audioFns.toggleMute && audioFns.toggleMute();
-          return;
-        }
-      }
+      } catch {}
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+  let unsubscribe;
+  try { unsubscribe = window.electronAPI?.onShortcut?.(onShortcut); } catch {}
+  return () => { try { (unsubscribe && typeof unsubscribe === 'function') ? unsubscribe() : window.electronAPI?.removeShortcutListener?.(onShortcut); } catch {} };
   }, [activeTabId, openFindFunction, tabs, zoomFns, audioFns, closedTabs]);
 
   const recordNav = (tabId, url, title) => {
@@ -503,9 +534,9 @@ const BrowserInterface = ({
   { (settings?.navBarPosition || 'top') === 'top' && (
   <NavigationBar
         currentUrl={currentUrl}
-        isLoading={pageLoading}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
+  isLoading={pageLoading}
+  canGoBack={navState.canGoBack}
+  canGoForward={navState.canGoForward}
   settings={settings}
         onNavigate={async (url) => {
           if (window.electronAPI) {
@@ -514,9 +545,9 @@ const BrowserInterface = ({
           onNavigate(url);
           handleTabUrlChange(activeTabId, url);
         }}
-        onGoBack={onGoBack}
-        onGoForward={onGoForward}
-  onReload={onReload}
+  onGoBack={() => navFnsRef.current?.goBack?.()}
+  onGoForward={() => navFnsRef.current?.goForward?.()}
+  onReload={() => navFnsRef.current?.reload?.()}
   onStop={() => stopLoadingFn && stopLoadingFn()}
         onShowBookmarks={() => setShowBookmarks(true)}
         onShowHistory={() => setShowHistory(true)}
@@ -562,7 +593,7 @@ const BrowserInterface = ({
                       <span style={{ width: 8, height:8, borderRadius: 4, background: color }} />
                       <button onClick={async ()=>{ if (window.electronAPI) await window.electronAPI.navigateToUrl(b.url); onNavigate(b.url); handleTabUrlChange(activeTabId, b.url, b.title); }} style={{ background:'transparent', border:'none', padding:0, cursor:'pointer', color:'var(--fg)', fontSize:12, textOverflow:'ellipsis', whiteSpace:'nowrap', overflow:'hidden', maxWidth: 160 }}>{b.title || host || b.url}</button>
                       <span style={{ color:'color-mix(in srgb, var(--fg) 50%, transparent)', fontSize:11, maxWidth: 120, overflow:'hidden', textOverflow:'ellipsis' }}>{host}</span>
-                      <button title="Open in new tab" onClick={()=>{ const newTab={ id:Date.now(), url:b.url, title:b.title||b.url, active:false, pinned:false}; setTabs(prev=>[...prev.map(t=>({...t,active:false})),{...newTab,active:true}]); setActiveTabId(newTab.id); onNavigate(b.url); }} style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:12 }}>🧭</button>
+                      <button title="Open in new tab" onClick={()=>{ const newTab={ id:newTabId(), url:b.url, title:b.title||b.url, active:false, pinned:false}; setTabs(prev=>[...prev.map(t=>({...t,active:false})),{...newTab,active:true}]); setActiveTabId(newTab.id); onNavigate(b.url); }} style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:12 }}>🧭</button>
                       <button title="Edit" onClick={()=> setEditingBookmark(b)} style={{ background:'transparent', border:'none', cursor:'pointer', fontSize:12 }}>✏️</button>
                     </div>
                   );
@@ -650,6 +681,8 @@ const BrowserInterface = ({
           onAudioAvailable={(fns) => setAudioFns(fns)}
           onLoadingChange={(loading) => setPageLoading(!!loading)}
           onProgressChange={(p) => setPageProgress(p || 0)}
+          onNavAvailable={(fns) => { navFnsRef.current = fns || {}; }}
+          onNavStateChange={(st) => setNavState({ canGoBack: !!st?.canGoBack, canGoForward: !!st?.canGoForward })}
         />
       </div>
 
@@ -657,17 +690,17 @@ const BrowserInterface = ({
         <NavigationBar
           currentUrl={currentUrl}
           isLoading={pageLoading}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
+          canGoBack={navState.canGoBack}
+          canGoForward={navState.canGoForward}
           settings={settings}
           onNavigate={async (url) => {
             if (window.electronAPI) { await window.electronAPI.navigateToUrl(url); }
             onNavigate(url);
             handleTabUrlChange(activeTabId, url);
           }}
-          onGoBack={onGoBack}
-          onGoForward={onGoForward}
-          onReload={onReload}
+          onGoBack={() => navFnsRef.current?.goBack?.()}
+          onGoForward={() => navFnsRef.current?.goForward?.()}
+          onReload={() => navFnsRef.current?.reload?.()}
           onStop={() => stopLoadingFn && stopLoadingFn()}
           onShowBookmarks={() => setShowBookmarks(true)}
           onShowHistory={() => setShowHistory(true)}

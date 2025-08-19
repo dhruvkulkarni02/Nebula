@@ -32,6 +32,52 @@ function shouldBlockUrl(u) {
   return false;
 }
 
+// Global shortcut de-duplication across window and any webviews
+// Ensures we only dispatch a given shortcut action once within a short window,
+// preventing cases like Cmd+T opening multiple tabs from multiple sources.
+const _lastShortcutTs = new Map();
+const SHORTCUT_DEDUP_WINDOW_MS = 200;
+function dedupAndSendShortcut(targetWebContents, payload) {
+  try {
+    if (!targetWebContents || targetWebContents.isDestroyed()) return;
+    const action = payload && payload.action;
+    if (!action) return;
+    const now = Date.now();
+    const last = _lastShortcutTs.get(action) || 0;
+    if (now - last < SHORTCUT_DEDUP_WINDOW_MS) return; // drop duplicate
+    _lastShortcutTs.set(action, now);
+    targetWebContents.send('shortcut', payload);
+  } catch (e) {
+    console.warn('Failed to send shortcut:', e?.message || e);
+  }
+}
+
+// Swipe synthesis via horizontal wheel aggregation (for cases where native 'swipe' isn't fired)
+const _swipeAgg = new Map(); // sourceKey -> { accum, cooldownUntil }
+function processWheelForSwipe(targetWebContents, sourceKey, deltaX) {
+  try {
+    if (!targetWebContents || targetWebContents.isDestroyed()) return;
+    const now = Date.now();
+    const st = _swipeAgg.get(sourceKey) || { accum: 0, cooldownUntil: 0 };
+    if (now < st.cooldownUntil) return;
+    // Accumulate horizontal deltas; positive = right, negative = left
+    st.accum += (typeof deltaX === 'number' ? deltaX : 0);
+    const threshold = 350; // tuned for macOS trackpads
+    if (st.accum >= threshold) {
+      st.accum = 0;
+      st.cooldownUntil = now + 450;
+      console.log('Synth swipe gesture: right');
+      targetWebContents.send('gesture-swipe', { direction: 'right', synthesized: true });
+    } else if (st.accum <= -threshold) {
+      st.accum = 0;
+      st.cooldownUntil = now + 450;
+      console.log('Synth swipe gesture: left');
+      targetWebContents.send('gesture-swipe', { direction: 'left', synthesized: true });
+    }
+    _swipeAgg.set(sourceKey, st);
+  } catch {}
+}
+
 // Development mode detection
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -56,6 +102,8 @@ function createWindow() {
       height: 800,
       minWidth: 800,
       minHeight: 600,
+      // macOS: enables rubber-banding; can improve gesture propagation
+      scrollBounce: true,
       webPreferences: {
         nodeIntegration: false, // Security: Disable node integration in renderer
         contextIsolation: true, // Security: Enable context isolation
@@ -136,6 +184,123 @@ function createWindow() {
       console.error('Renderer process became unresponsive');
     });
 
+    // Global keyboard shortcuts routed to renderer so they work even when a webview has focus
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+      try {
+        if (!input || input.type !== 'keyDown') return;
+        const meta = !!(input.meta || input.control);
+        const alt = !!input.alt;
+        const shift = !!input.shift;
+        const key = String(input.key || '').toLowerCase();
+        const code = String(input.code || '');
+        const repeat = !!input.isAutoRepeat;
+
+        // Swallow auto-repeats for meta-based shortcuts to avoid spamming actions (e.g., Cmd+T)
+        if (meta && repeat) {
+          event.preventDefault();
+          return;
+        }
+
+        // Navigation: Back / Forward
+        if ((meta && key === '[') || (alt && !meta && !shift && (key === 'arrowleft' || code === 'ArrowLeft'))) {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'back', source: 'host', repeat });
+          return;
+        }
+        if ((meta && key === ']') || (alt && !meta && !shift && (key === 'arrowright' || code === 'ArrowRight'))) {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'forward', source: 'host', repeat });
+          return;
+        }
+
+        // Reload
+        if (meta && key === 'r' && !shift && !alt) {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'reload', source: 'host', repeat });
+          return;
+        }
+        if (meta && shift && key === 'r') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'reloadHard', source: 'host', repeat });
+          return;
+        }
+
+        // New/Close Tab
+        if (meta && !shift && !alt && key === 't') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'newTab', source: 'host', repeat });
+          return;
+        }
+        if (meta && !shift && !alt && key === 'w') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'closeTab', source: 'host', repeat });
+          return;
+        }
+
+        // Focus address bar
+        if (meta && !shift && !alt && key === 'l') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'focusOmnibox', source: 'host', repeat });
+          return;
+        }
+
+        // Find in page
+        if (meta && !shift && !alt && key === 'f') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'find', source: 'host', repeat });
+          return;
+        }
+
+        // Reopen closed tab
+        if (meta && shift && !alt && key === 't') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'reopenClosedTab', source: 'host', repeat });
+          return;
+        }
+
+        // Cycle tabs (Cmd/Ctrl+Tab, +Shift for prev)
+        if (meta && key === 'tab') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: shift ? 'prevTab' : 'nextTab', source: 'host', repeat });
+          return;
+        }
+
+        // Switch to tab by number (1..9)
+        if (meta && !shift && !alt && /^[1-9]$/.test(key)) {
+          event.preventDefault();
+          const index = key === '9' ? 9 : parseInt(key, 10); // 9 = last
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'nthTab', index, source: 'host', repeat });
+          return;
+        }
+
+        // Zoom controls
+        if (meta && !alt && !shift && (key === '=' || key === '+')) {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'zoomIn', source: 'host', repeat });
+          return;
+        }
+        if (meta && !alt && !shift && key === '-') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'zoomOut', source: 'host', repeat });
+          return;
+        }
+        if (meta && !alt && !shift && key === '0') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'resetZoom', source: 'host', repeat });
+          return;
+        }
+
+        // Mute toggle
+        if (meta && !alt && !shift && key === 'm') {
+          event.preventDefault();
+          dedupAndSendShortcut(mainWindow.webContents, { action: 'toggleMute', source: 'host', repeat });
+          return;
+        }
+      } catch (e) {
+        console.warn('before-input-event handler error:', e?.message || e);
+      }
+    });
+
     // Handle window closed
     mainWindow.on('closed', () => {
       mainWindow = null;
@@ -190,11 +355,22 @@ function createWindow() {
   // macOS: two-finger swipe gestures for back/forward
   mainWindow.on('swipe', (event, direction) => {
     try {
+  console.log('Main swipe gesture:', direction);
       mainWindow.webContents.send('gesture-swipe', { direction });
     } catch (e) {
       console.warn('Failed to propagate swipe gesture:', e);
     }
   });
+
+  // Fallback: synthesize swipe from horizontal wheel deltas in main window
+  try {
+    mainWindow.webContents.on('wheel', (_ev, deltaX, deltaY, deltaZ) => {
+      // Only consider horizontal gesture
+      if (Math.abs(deltaX) > Math.abs(deltaY)) {
+        processWheelForSwipe(mainWindow.webContents, 'main', deltaX);
+      }
+    });
+  } catch {}
 }
 
 function createSettingsWindow() {
@@ -996,6 +1172,13 @@ function setupIpcHandlers() {
       adBlockEnabled = !!updated.enableAdBlocker;
       console.log('Ad blocker now', adBlockEnabled ? 'ENABLED' : 'DISABLED');
     }
+    // Keep allowlist in sync without requiring restart
+    if (Object.prototype.hasOwnProperty.call(updated, 'adBlockAllowlist')) {
+      try {
+        const list = Array.isArray(updated.adBlockAllowlist) ? updated.adBlockAllowlist : [];
+        adBlockAllowlist = new Set(list.map(h => String(h || '').toLowerCase()).filter(Boolean));
+      } catch {}
+    }
     // Notify all renderer windows that settings changed
     try {
       const { BrowserWindow } = require('electron');
@@ -1327,6 +1510,128 @@ app.on('web-contents-created', (event, contents) => {
       console.log('Webview navigating to:', navigationUrl);
       // Allow navigation for webview
     });
+
+  // Forward swipe gestures from webview to host (renderer) so history navigation works
+    try {
+      contents.on('swipe', (_event, direction) => {
+        try {
+          const host = contents.hostWebContents || null;
+          if (host && !host.isDestroyed()) {
+            console.log('Webview swipe gesture:', direction);
+            host.send('gesture-swipe', { direction });
+          }
+        } catch (e) {
+          console.warn('Failed to forward swipe from webview:', e?.message || e);
+        }
+      });
+    } catch {}
+
+    // Fallback: synthesize swipe from horizontal wheel deltas in webview
+    try {
+      contents.on('wheel', (_ev, deltaX, deltaY, deltaZ) => {
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          const host = contents.hostWebContents || null;
+          if (host && !host.isDestroyed()) {
+            processWheelForSwipe(host, `wv-${contents.id}`, deltaX);
+          }
+        }
+      });
+    } catch {}
+
+  // Forward keyboard shortcuts from webview to host so they work when webview is focused
+    try {
+      contents.on('before-input-event', (event, input) => {
+        try {
+          if (!input || input.type !== 'keyDown') return;
+          const meta = !!(input.meta || input.control);
+          const alt = !!input.alt;
+          const shift = !!input.shift;
+          const key = String(input.key || '').toLowerCase();
+          const repeat = !!input.isAutoRepeat;
+          const host = contents.hostWebContents || null;
+          const send = (payload) => { if (host && !host.isDestroyed()) dedupAndSendShortcut(host, { ...payload, source: 'webview', repeat }); };
+
+          // Swallow auto-repeats for meta-based shortcuts to avoid spamming actions
+          if (meta && repeat) {
+            event.preventDefault();
+            return;
+          }
+
+          // Back / Forward
+          if ((meta && key === '[') || (alt && !meta && !shift && key === 'arrowleft')) {
+            event.preventDefault();
+            return send({ action: 'back' });
+          }
+          if ((meta && key === ']') || (alt && !meta && !shift && key === 'arrowright')) {
+            event.preventDefault();
+            return send({ action: 'forward' });
+          }
+          // Reload
+          if (meta && key === 'r' && !shift && !alt) {
+            event.preventDefault();
+            return send({ action: 'reload' });
+          }
+          if (meta && shift && key === 'r') {
+            event.preventDefault();
+            return send({ action: 'reloadHard' });
+          }
+          // New/Close tab
+          if (meta && !shift && !alt && key === 't') {
+            event.preventDefault();
+            return send({ action: 'newTab' });
+          }
+          if (meta && !shift && !alt && key === 'w') {
+            event.preventDefault();
+            return send({ action: 'closeTab' });
+          }
+          // Omnibox / find
+          if (meta && !shift && !alt && key === 'l') {
+            event.preventDefault();
+            return send({ action: 'focusOmnibox' });
+          }
+          if (meta && !shift && !alt && key === 'f') {
+            event.preventDefault();
+            return send({ action: 'find' });
+          }
+          // Reopen closed tab
+          if (meta && shift && !alt && key === 't') {
+            event.preventDefault();
+            return send({ action: 'reopenClosedTab' });
+          }
+          // Cycle tabs
+          if (meta && key === 'tab') {
+            event.preventDefault();
+            return send({ action: shift ? 'prevTab' : 'nextTab' });
+          }
+          // Switch nth tab
+          if (meta && !shift && !alt && /^[1-9]$/.test(key)) {
+            event.preventDefault();
+            const index = key === '9' ? 9 : parseInt(key, 10);
+            return send({ action: 'nthTab', index });
+          }
+          // Zoom
+          if (meta && !alt && !shift && (key === '=' || key === '+')) {
+            event.preventDefault();
+            return send({ action: 'zoomIn' });
+          }
+          if (meta && !alt && !shift && key === '-') {
+            event.preventDefault();
+            return send({ action: 'zoomOut' });
+          }
+          if (meta && !alt && !shift && key === '0') {
+            event.preventDefault();
+            return send({ action: 'resetZoom' });
+          }
+          // Mute
+          if (meta && !alt && !shift && key === 'm') {
+            event.preventDefault();
+            return send({ action: 'toggleMute' });
+          }
+        } catch (e) {
+          console.warn('webview before-input-event error:', e?.message || e);
+        }
+      });
+    } catch {}
   } else {
     console.log('Unknown content type:', type, 'allowing navigation');
   }

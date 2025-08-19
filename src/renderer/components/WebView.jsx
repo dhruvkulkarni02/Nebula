@@ -2,12 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
 import '../styles/WebView.css';
 
-const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable, settings }) => {
+const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable, onNavAvailable, onNavStateChange, settings }) => {
   const webviewRef = useRef(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showFind, setShowFind] = useState(false);
+  const [showAddTile, setShowAddTile] = useState(false);
+  const [tileForm, setTileForm] = useState({ title: '', url: '' });
   const partitionNameRef = useRef('webview');
 
   // Decide partition once per window for private browsing
@@ -95,6 +97,18 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     }
   }, [onAudioAvailable]);
 
+  // Expose back/forward/reload controls to parent
+  useEffect(() => {
+    if (onNavAvailable && webviewRef.current) {
+      const wv = webviewRef.current;
+      onNavAvailable({
+        goBack: () => { try { if (wv.canGoBack()) wv.goBack(); } catch {} },
+        goForward: () => { try { if (wv.canGoForward()) wv.goForward(); } catch {} },
+        reload: () => { try { wv.reload(); } catch {} },
+      });
+    }
+  }, [onNavAvailable, webviewRef.current]);
+
   // Overlay tools removed
 
   useEffect(() => {
@@ -118,6 +132,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
         const title = webview.getTitle();
         console.log('Navigation:', currentUrl, title);
         onUrlChangeRef.current && onUrlChangeRef.current(currentUrl, title);
+
+  // Propagate nav state (canGoBack/Forward)
+  try { onNavStateChange && onNavStateChange({ canGoBack: !!webview.canGoBack(), canGoForward: !!webview.canGoForward() }); } catch {}
 
         // Add to history (skip for private windows)
         const isPrivate = !!window.electronAPI?.isPrivateWindow?.();
@@ -152,6 +169,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       setLoadProgress(10);
       try { onProgressChange && onProgressChange(10); } catch {}
       try { onLoadingChange && onLoadingChange(true); } catch {}
+  try { onNavStateChange && onNavStateChange({ canGoBack: !!webview.canGoBack(), canGoForward: !!webview.canGoForward() }); } catch {}
       setHasError(false);
     };
 
@@ -160,6 +178,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       setLoadProgress(100);
       try { onProgressChange && onProgressChange(100); } catch {}
       try { onLoadingChange && onLoadingChange(false); } catch {}
+  try { onNavStateChange && onNavStateChange({ canGoBack: !!webview.canGoBack(), canGoForward: !!webview.canGoForward() }); } catch {}
     };
 
     const handleFailLoad = (event) => {
@@ -280,21 +299,61 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
             color: getComputedStyle(document.documentElement).getPropertyValue('--fg') || undefined
           }}>🌤️ NebulaBrowser</h1>
           <p style={{ marginBottom: 16 }}>Tip: Cmd/Ctrl+L to focus the address bar, Cmd/Ctrl+T to open a new tab.</p>
-          {!!(settings?.homeTiles && settings.homeTiles.length) && (
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, width:'min(900px, 90vw)' }}>
-              {settings.homeTiles.map((tile, i) => (
-                <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
-                  display:'flex', flexDirection:'column', alignItems:'center', gap:8,
-                  background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
-                }}>
-                  {tile?.icon ? (
-                    <img alt="" src={tile.icon} style={{ width:32, height:32, objectFit:'contain' }} />
-                  ) : (
-                    <div style={{ width:32, height:32, borderRadius:8, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>
-                  )}
-                  <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
-                </button>
-              ))}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, width:'min(900px, 90vw)' }}>
+            {/* Add Tile card */}
+            <button onClick={()=>{ setTileForm({ title:'', url:'' }); setShowAddTile(true); }} style={{
+              display:'flex', flexDirection:'column', alignItems:'center', gap:8,
+              background:'var(--card-bg)', color:'var(--fg)', border:'1px dashed var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
+            }} title="Add a site to Home">
+              <div style={{ width:32, height:32, borderRadius:8, background:'color-mix(in srgb, var(--accent) 15%, transparent)', display:'flex', alignItems:'center', justifyContent:'center' }}>＋</div>
+              <div style={{ fontWeight:600, fontSize:14, textAlign:'center' }}>Add Tile</div>
+            </button>
+            {(settings?.homeTiles || []).map((tile, i) => (
+              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
+                display:'flex', flexDirection:'column', alignItems:'center', gap:8,
+                background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
+              }}>
+                {tile?.icon ? (
+                  <img alt="" src={tile.icon} style={{ width:32, height:32, objectFit:'contain' }} />
+                ) : (
+                  <div style={{ width:32, height:32, borderRadius:8, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>
+                )}
+                <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
+              </button>
+            ))}
+          </div>
+
+          {showAddTile && (
+            <div style={{ position:'fixed', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'color-mix(in srgb, var(--bg) 40%, transparent)' }} onClick={()=>setShowAddTile(false)}>
+              <div style={{ background:'var(--panel)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:16, width:360 }} onClick={(e)=>e.stopPropagation()}>
+                <h3 style={{ marginBottom:8 }}>Add Tile</h3>
+                <div style={{ display:'grid', gap:8 }}>
+                  <input placeholder="URL (https://...)" value={tileForm.url} onChange={(e)=> setTileForm(f=>({ ...f, url: e.target.value }))} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'var(--bg)', color:'var(--fg)' }} />
+                  <input placeholder="Title (optional)" value={tileForm.title} onChange={(e)=> setTileForm(f=>({ ...f, title: e.target.value }))} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'var(--bg)', color:'var(--fg)' }} />
+                  <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:4 }}>
+                    <button onClick={()=>setShowAddTile(false)} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'transparent', cursor:'pointer' }}>Cancel</button>
+                    <button onClick={async ()=>{
+                      try {
+                        const ensureUrl = (u)=>{ let s=String(u||'').trim(); if(!s) return ''; if(!/^https?:\/\//i.test(s)){ s='https://'+s; } return s; };
+                        const u = ensureUrl(tileForm.url);
+                        if (!u) return;
+                        let title = (tileForm.title||'').trim();
+                        const host = (()=>{ try{ return new URL(u).hostname; }catch{return ''; }})();
+                        if (!title) title = host || u;
+                        const origin = (()=>{ try{ return new URL(u).origin; }catch{return ''; }})();
+                        const icon = origin ? origin + '/favicon.ico' : '';
+                        const cur = (settings?.homeTiles || []);
+                        const existingIdx = cur.findIndex(t => (t.url||'').trim() === u);
+                        const next = [...cur];
+                        if (existingIdx >= 0) next[existingIdx] = { ...next[existingIdx], title, url: u, icon };
+                        else next.unshift({ title, url: u, icon });
+                        await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: next });
+                        setShowAddTile(false);
+                      } catch {}
+                    }} style={{ padding:'8px 10px', border:'1px solid var(--accent)', borderRadius:8, background:'var(--accent)', color:'#fff', cursor:'pointer' }}>Save</button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
