@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
 import '../styles/WebView.css';
 
-const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable }) => {
+const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable, settings }) => {
   const webviewRef = useRef(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
@@ -95,70 +95,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     }
   }, [onAudioAvailable]);
 
-  // Provide overlay blocker utility to parent (once)
-  const onOverlayToolsAvailableRef = useRef(onOverlayToolsAvailable);
-  useEffect(() => { onOverlayToolsAvailableRef.current = onOverlayToolsAvailable; }, [onOverlayToolsAvailable]);
-  useEffect(() => {
-    if (exposedOnceRef.current.overlay) return;
-    if (!onOverlayToolsAvailableRef.current) return;
-    const killOverlays = async () => {
-      try {
-        const webview = webviewRef.current;
-        if (!webview || !webview.executeJavaScript) return { error: 'webview not ready' };
-        const script = `(() => {
-          try {
-            const removed = [];
-            const selectors = [
-              '[aria-modal="true"]', '[role="dialog"]', '[role="alertdialog"]',
-              '.modal', '.overlay', '.backdrop', '.cookie', '.cookies', '.consent', '.gdpr', '.newsletter', '.subscribe', '.paywall', '.popup', '.interstitial',
-              '#cookie', '#cookies', '#consent', '#gdpr'
-            ];
-            selectors.forEach(sel => document.querySelectorAll(sel).forEach(el => {
-              el.style.setProperty('display','none','important');
-              el.style.setProperty('visibility','hidden','important');
-              el.style.setProperty('pointer-events','none','important');
-              removed.push(el.tagName+':'+(el.id||el.className));
-            }));
-            const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-            const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
-            const minArea = vw*vh*0.2;
-            Array.from(document.querySelectorAll('body *')).forEach(el => {
-              const cs = getComputedStyle(el);
-              if (cs.position === 'fixed' || cs.position === 'sticky') {
-                const rect = el.getBoundingClientRect();
-                const area = Math.max(0, rect.width)*Math.max(0, rect.height);
-                if (area > minArea && rect.top < 50) {
-                   el.style.setProperty('display','none','important');
-                   el.style.setProperty('visibility','hidden','important');
-                   el.style.setProperty('pointer-events','none','important');
-                   removed.push('fixed:'+(el.id||el.className));
-                }
-              }
-            });
-            ['html','body'].forEach(tag => {
-              const el = document.querySelector(tag);
-              if (el) {
-                el.style.setProperty('overflow','auto','important');
-                el.style.removeProperty('position');
-                el.style.removeProperty('height');
-              }
-            });
-            document.querySelectorAll('[style*="backdrop-filter"],[class*="backdrop"],[class*="dim"]').forEach(el => {
-              el.style.removeProperty('backdrop-filter');
-              el.style.background = 'transparent';
-            });
-            return {removedCount: removed.length};
-          } catch(e) { return {error: String(e)}; }
-        })();`;
-        const res = await webview.executeJavaScript(script, true);
-        return res;
-      } catch (e) {
-        return { error: e?.message || String(e) };
-      }
-    };
-    onOverlayToolsAvailableRef.current({ killOverlays });
-    exposedOnceRef.current.overlay = true;
-  }, []);
+  // Overlay tools removed
 
   useEffect(() => {
     // Only set up event listeners if we have a valid URL and webview element
@@ -331,18 +268,35 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       {/* Spinner overlay removed: progress now shown as a slim bar in the navigation area */}
       
       {!url || url === 'about:blank' ? (
-        <div className="start-page">
-          <h1>🌤️ NebulaBrowser</h1>
-          <p>Simple, private, and fast. Your browsing starts here.</p>
-          <p>Tip: Cmd/Ctrl+L to focus the address bar, Cmd/Ctrl+T to open a new tab.</p>
-          <div className="quick-actions">
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://duckduckgo.com')}>🦆 DuckDuckGo</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://google.com')}>🔍 Google</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://github.com')}>💻 GitHub</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://wikipedia.org')}>📚 Wikipedia</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://youtube.com')}>📺 YouTube</button>
-            <button className="quick-action" onClick={() => onNavigate && onNavigate('https://news.ycombinator.com')}>📰 Hacker News</button>
-          </div>
+        <div className="start-page" style={{
+          backgroundImage: settings?.homeWallpaper ? `url('${settings.homeWallpaper}')` : 'none',
+          backgroundSize: 'cover', backgroundPosition: 'center',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          padding: 24
+        }}>
+          <h1 style={{
+            backdropFilter: settings?.homeWallpaper ? 'blur(4px)' : 'none',
+            padding: 8, borderRadius: 8,
+            color: getComputedStyle(document.documentElement).getPropertyValue('--fg') || undefined
+          }}>🌤️ NebulaBrowser</h1>
+          <p style={{ marginBottom: 16 }}>Tip: Cmd/Ctrl+L to focus the address bar, Cmd/Ctrl+T to open a new tab.</p>
+          {!!(settings?.homeTiles && settings.homeTiles.length) && (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, width:'min(900px, 90vw)' }}>
+              {settings.homeTiles.map((tile, i) => (
+                <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
+                  display:'flex', flexDirection:'column', alignItems:'center', gap:8,
+                  background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
+                }}>
+                  {tile?.icon ? (
+                    <img alt="" src={tile.icon} style={{ width:32, height:32, objectFit:'contain' }} />
+                  ) : (
+                    <div style={{ width:32, height:32, borderRadius:8, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>
+                  )}
+                  <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <webview

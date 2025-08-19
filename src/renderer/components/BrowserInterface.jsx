@@ -34,8 +34,7 @@ const BrowserInterface = ({
   const [pageProgress, setPageProgress] = useState(0);
   const [bookmarksSort, setBookmarksSort] = useState('custom'); // custom|alpha|recent|host
   const [editingBookmark, setEditingBookmark] = useState(null); // {url,title,tags,note,color,pinned}
-  const [overlayFns, setOverlayFns] = useState({ killOverlays: null });
-  const [sessionMapOpen, setSessionMapOpen] = useState(false);
+  // overlay cleaner & session map removed per request
   const sessionGraphRef = useRef({}); // tabId -> { nodes: [{id,url,title}], edges: [{from,to}] }
 
   useEffect(() => {
@@ -46,7 +45,20 @@ const BrowserInterface = ({
           const s = await window.electronAPI.getSettings();
           setSettings(s || {});
           setShowBookmarksBar(!!s?.showBookmarksBarDefault);
-          try { document.documentElement.setAttribute('data-reduce-motion', s?.reduceMotion ? 'true' : 'false'); } catch {}
+          try {
+            document.documentElement.setAttribute('data-reduce-motion', s?.reduceMotion ? 'true' : 'false');
+            // Apply theme on startup
+            const applyTheme = (theme) => {
+              if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+              else document.documentElement.setAttribute('data-theme', 'light');
+            };
+            if (s?.theme === 'system' || !s?.theme) {
+              const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+              applyTheme(prefersDark && prefersDark.matches ? 'dark' : 'light');
+            } else {
+              applyTheme(s.theme);
+            }
+          } catch {}
           if (s && Array.isArray(s.bookmarksBarOrder)) {
             // reorder bookmarks by saved order (unknown URLs appended at end)
             const order = s.bookmarksBarOrder;
@@ -61,6 +73,27 @@ const BrowserInterface = ({
     };
     load();
   }, []);
+
+  // React to theme changes at runtime (from Settings)
+  useEffect(() => {
+    if (!settings) return;
+    try {
+      const applyTheme = (theme) => {
+        document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+      };
+      if (settings.theme === 'system' || !settings.theme) {
+        const mql = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+        applyTheme(mql && mql.matches ? 'dark' : 'light');
+        const handler = (e) => applyTheme(e.matches ? 'dark' : 'light');
+        if (mql && mql.addEventListener) {
+          mql.addEventListener('change', handler);
+          return () => mql.removeEventListener('change', handler);
+        }
+      } else {
+        applyTheme(settings.theme);
+      }
+    } catch {}
+  }, [settings?.theme]);
 
   const filteredBookmarks = useMemo(() => {
     const q = bookmarkQuery.trim().toLowerCase();
@@ -390,8 +423,9 @@ const BrowserInterface = ({
 
   return (
     <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
-      {/* Tab Bar */}
-      <div className="tab-bar" onDoubleClick={handleNewTab}>
+  {/* Tab Bar (hidden when vertical tabs are enabled) */}
+  {(settings?.tabsLayout || 'top') !== 'vertical-left' && (
+  <div className="tab-bar" onDoubleClick={handleNewTab}>
         {displayTabs.map((tab, idx) => (
           <div
             key={tab.id}
@@ -432,10 +466,12 @@ const BrowserInterface = ({
         <button className="new-tab-button" onClick={handleNewTab}>
           +
         </button>
-      </div>
+  </div>
+  )}
 
-      {/* Navigation Bar */}
-      <NavigationBar
+  {/* Navigation Bar (position configurable) */}
+  { (settings?.navBarPosition || 'top') === 'top' && (
+  <NavigationBar
         currentUrl={currentUrl}
         isLoading={pageLoading}
         canGoBack={canGoBack}
@@ -458,7 +494,7 @@ const BrowserInterface = ({
         onOpenFind={() => openFindFunction && openFindFunction()}
   onOpenSettings={() => setShowSettings(true)}
   progress={pageProgress}
-      />
+  />)}
 
       {pageLoading && (
         <div className="top-progress">
@@ -534,11 +570,41 @@ const BrowserInterface = ({
         </div>
       )}
 
-      {/* Web Content Area */}
-      <div className="content-area">
+    {/* Web Content Area + optional vertical tabs */}
+      <div className="content-area" style={{ display: 'flex' }}>
+        {(settings?.tabsLayout || 'top') === 'vertical-left' && (
+          <div style={{ width: 220, borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', marginBottom: 6 }}>
+              <div style={{ fontSize: 12, color: '#64748b' }}>Tabs</div>
+              <button className="new-tab-button" onClick={handleNewTab}>+</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflow: 'auto' }}>
+              {displayTabs.map((tab, idx) => (
+                <div
+                  key={tab.id}
+                  className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''}`}
+                  onClick={() => handleSwitchTab(tab.id)}
+                  onContextMenu={(e) => { e.preventDefault(); setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id }); }}
+                  draggable
+                  onDragStart={handleTabDragStart(idx)}
+                  onDragOver={handleTabDragOver(idx)}
+                  onDrop={handleTabDrop(idx)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid #cbd5e1' : '1px solid transparent', background: tab.active ? '#f8fafc' : 'transparent' }}
+                >
+                  {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3 }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{tab.title}</span>
+                  {!tab.pinned && (
+                    <button className="tab-close" onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}>×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <WebView
           url={currentUrl}
           isLoading={isLoading}
+      settings={settings}
           onUrlChange={(url, title) => handleTabUrlChange(activeTabId, url, title)}
           onNavigate={async (url) => {
             if (window.electronAPI) {
@@ -554,39 +620,32 @@ const BrowserInterface = ({
           onAudioAvailable={(fns) => setAudioFns(fns)}
           onLoadingChange={(loading) => setPageLoading(!!loading)}
           onProgressChange={(p) => setPageProgress(p || 0)}
-          onOverlayToolsAvailable={(fns) => setOverlayFns(fns)}
         />
       </div>
 
-      {/* Overlay blocker and Session Map buttons */}
-      <div style={{ position:'absolute', top: 44, right: 64, display:'flex', gap:8, zIndex: 900 }}>
-        <button title="Clear overlays (cookie walls, popups)" onClick={async()=>{ try{ const res = await overlayFns?.killOverlays?.(); console.log('Overlay cleaner:', res); }catch{} }} style={{ background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:8, padding:'4px 8px', fontSize:12 }}>🧼 Clean</button>
-        <button title="Session map" onClick={()=> setSessionMapOpen(true)} style={{ background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:8, padding:'4px 8px', fontSize:12 }}>🗺️ Map</button>
-      </div>
-
-      {/* Session Map modal */}
-      {sessionMapOpen && (
-        <div className="bookmarks-overlay" onClick={()=> setSessionMapOpen(false)}>
-          <div className="bookmarks-panel" onClick={(e)=> e.stopPropagation()} style={{ maxWidth: 720 }}>
-            <div className="bookmarks-header"><h3>🗺️ Session Map</h3></div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, maxHeight: 420, overflow:'auto' }}>
-              {(sessionGraphRef.current[activeTabId]?.nodes || []).slice(-30).map((n, idx, arr) => {
-                const prev = idx>0 ? arr[idx-1] : null;
-                return (
-                  <div key={n.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', border:'1px solid #e2e8f0', borderRadius:8 }}>
-                    <div style={{ width: 8, height:8, borderRadius:4, background: '#94a3b8' }} />
-                    <div style={{ minWidth:0, flex:1 }}>
-                      <div style={{ fontSize:13, color:'#0f172a', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{n.title || n.url}</div>
-                      <div style={{ fontSize:11, color:'#64748b', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{n.url}</div>
-                    </div>
-                    {prev && <div style={{ fontSize:12, color:'#94a3b8' }}>→</div>}
-                    <button onClick={()=>{ onNavigate(n.url); handleTabUrlChange(activeTabId, n.url, n.title); setSessionMapOpen(false); }} style={{ background:'transparent', border:'1px solid #e2e8f0', borderRadius:6, padding:'4px 8px', fontSize:12 }}>Open</button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      { (settings?.navBarPosition || 'top') === 'bottom' && (
+        <NavigationBar
+          currentUrl={currentUrl}
+          isLoading={pageLoading}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          settings={settings}
+          onNavigate={async (url) => {
+            if (window.electronAPI) { await window.electronAPI.navigateToUrl(url); }
+            onNavigate(url);
+            handleTabUrlChange(activeTabId, url);
+          }}
+          onGoBack={onGoBack}
+          onGoForward={onGoForward}
+          onReload={onReload}
+          onStop={() => stopLoadingFn && stopLoadingFn()}
+          onShowBookmarks={() => setShowBookmarks(true)}
+          onShowHistory={() => setShowHistory(true)}
+          onShowDownloads={() => setShowDownloads(true)}
+          onOpenFind={() => openFindFunction && openFindFunction()}
+          onOpenSettings={() => setShowSettings(true)}
+          progress={pageProgress}
+        />
       )}
 
       {/* Bookmarks Panel */}

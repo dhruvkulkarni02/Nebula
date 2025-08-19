@@ -8,6 +8,13 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   const [showBookmarksBarDefault, setShowBookmarksBarDefault] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [enableAdBlocker, setEnableAdBlocker] = useState(false);
+  // Customization
+  const [homeWallpaper, setHomeWallpaper] = useState('');
+  const [navBarPosition, setNavBarPosition] = useState('top'); // top|bottom
+  const [tabsLayout, setTabsLayout] = useState('top'); // top|vertical-left
+  const [showButtons, setShowButtons] = useState({ bookmarks: true, history: true, downloads: true, find: true, private: true });
+  const [theme, setTheme] = useState('system'); // light | dark | system
+  const [homeTiles, setHomeTiles] = useState([]); // [{title,url,icon}]
 
   useEffect(() => {
     if (!isOpen) return;
@@ -21,6 +28,18 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   setShowBookmarksBarDefault(!!s.showBookmarksBarDefault);
   setReduceMotion(!!s.reduceMotion);
   setEnableAdBlocker(!!s.enableAdBlocker);
+  setHomeWallpaper(s.homeWallpaper || '');
+        setNavBarPosition(s.navBarPosition || 'top');
+        setTabsLayout(s.tabsLayout || 'top');
+  setTheme(s.theme || 'system');
+  setHomeTiles(Array.isArray(s.homeTiles) ? s.homeTiles : []);
+        setShowButtons({
+          bookmarks: s?.toolbarButtons?.bookmarks !== false,
+          history: s?.toolbarButtons?.history !== false,
+          downloads: s?.toolbarButtons?.downloads !== false,
+          find: s?.toolbarButtons?.find !== false,
+          private: s?.toolbarButtons?.private !== false,
+        });
       } catch {}
       setLoading(false);
     })();
@@ -28,7 +47,7 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   }, [isOpen]);
 
   const handleSave = async () => {
-  const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker };
+  const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker, homeWallpaper, navBarPosition, tabsLayout, toolbarButtons: showButtons, theme, homeTiles };
     try {
       const res = await window.electronAPI?.updateSettings?.(payload);
       if (res?.success) {
@@ -110,6 +129,66 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
                 />
                 Reduce motion (fewer animations)
               </label>
+            </div>
+
+            <hr />
+            <div className="setting-item">
+              <label className="setting-label">Theme</label>
+              <select className="setting-input" value={theme} onChange={(e)=>setTheme(e.target.value)}>
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+
+            <div className="setting-item">
+              <label className="setting-label">Home wallpaper URL</label>
+              <input className="setting-input" placeholder="https://example.com/wallpaper.jpg" value={homeWallpaper} onChange={(e)=>setHomeWallpaper(e.target.value)} />
+              <div className="hint">Leave empty for plain background</div>
+            </div>
+
+            <div className="setting-item">
+              <label className="setting-label">Navigation bar position</label>
+              <select className="setting-input" value={navBarPosition} onChange={(e)=>setNavBarPosition(e.target.value)}>
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </div>
+
+            <div className="setting-item">
+              <label className="setting-label">Tabs layout</label>
+              <select className="setting-input" value={tabsLayout} onChange={(e)=>setTabsLayout(e.target.value)}>
+                <option value="top">Top (horizontal)</option>
+                <option value="vertical-left">Left (vertical)</option>
+              </select>
+            </div>
+
+            <div className="setting-item">
+              <div className="setting-label">Toolbar buttons</div>
+              {['bookmarks','history','downloads','find','private'].map(key => (
+                <label key={key} className="setting-check">
+                  <input type="checkbox" checked={!!showButtons[key]} onChange={(e)=> setShowButtons(prev=>({ ...prev, [key]: e.target.checked }))} /> Show {key}
+                </label>
+              ))}
+            </div>
+
+            <hr />
+            <div className="setting-item">
+              <div className="setting-label">Home page tiles</div>
+              <div className="hint">Add quick links to show on the home page.</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {homeTiles.map((t, idx) => (
+                  <div key={idx} style={{ display:'grid', gridTemplateColumns:'1fr 2fr 1fr auto', gap:6, alignItems:'center' }}>
+                    <input className="setting-input" placeholder="Title" value={t.title||''} onChange={(e)=> setHomeTiles(prev=> prev.map((x,i)=> i===idx?{...x,title:e.target.value}:x))} />
+                    <input className="setting-input" placeholder="https://site.com" value={t.url||''} onChange={(e)=> setHomeTiles(prev=> prev.map((x,i)=> i===idx?{...x,url:e.target.value}:x))} />
+                    <input className="setting-input" placeholder="Icon URL (optional)" value={t.icon||''} onChange={(e)=> setHomeTiles(prev=> prev.map((x,i)=> i===idx?{...x,icon:e.target.value}:x))} />
+                    <button className="btn secondary" onClick={()=> setHomeTiles(prev=> prev.filter((_,i)=> i!==idx))}>Remove</button>
+                  </div>
+                ))}
+                <div>
+                  <button className="btn" onClick={()=> setHomeTiles(prev=> [...prev, { title:'', url:'', icon:'' }])}>Add tile</button>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -543,6 +543,7 @@ const NavigationBar = ({
       </form>
 
       <div className="menu-buttons">
+        {(settings?.toolbarButtons?.bookmarks !== false) && (
         <button
           className={`menu-button ${isBookmarked ? 'bookmarked' : ''}`}
           title={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
@@ -550,12 +551,12 @@ const NavigationBar = ({
           disabled={!currentUrl || currentUrl === 'about:blank'}
         >
           {isBookmarked ? '⭐' : '☆'}
-        </button>
-        <button className="menu-button" title="View bookmarks" onClick={onShowBookmarks}>📚</button>
-        <button className="menu-button" title="View history" onClick={onShowHistory}>📖</button>
-        <button className="menu-button" title="New private window" onClick={() => window.electronAPI?.openPrivateWindow?.()}>🕶️</button>
-        <button className="menu-button" title="Find in page (Ctrl+F)" onClick={onOpenFind} disabled={!currentUrl || currentUrl === 'about:blank'}>🔍</button>
-        <button className="menu-button" title="Downloads" onClick={onShowDownloads}>📥</button>
+        </button>)}
+        {(settings?.toolbarButtons?.bookmarks !== false) && (<button className="menu-button" title="View bookmarks" onClick={onShowBookmarks}>📚</button>)}
+        {(settings?.toolbarButtons?.history !== false) && (<button className="menu-button" title="View history" onClick={onShowHistory}>📖</button>)}
+        {(settings?.toolbarButtons?.private !== false) && (<button className="menu-button" title="New private window" onClick={() => window.electronAPI?.openPrivateWindow?.()}>🕶️</button>)}
+        {(settings?.toolbarButtons?.find !== false) && (<button className="menu-button" title="Find in page (Ctrl+F)" onClick={onOpenFind} disabled={!currentUrl || currentUrl === 'about:blank'}>🔍</button>)}
+        {(settings?.toolbarButtons?.downloads !== false) && (<button className="menu-button" title="Downloads" onClick={onShowDownloads}>📥</button>)}
       </div>
       <button
         className="menu-button"
