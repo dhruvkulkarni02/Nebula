@@ -116,6 +116,15 @@ const BrowserInterface = ({
     } catch {}
   }, [settings?.accentColor]);
 
+  // Reflect bookmarks bar visibility changes from settings live
+  useEffect(() => {
+    try {
+      if (settings && Object.prototype.hasOwnProperty.call(settings, 'showBookmarksBarDefault')) {
+        setShowBookmarksBar(!!settings.showBookmarksBarDefault);
+      }
+    } catch {}
+  }, [settings?.showBookmarksBarDefault]);
+
   const filteredBookmarks = useMemo(() => {
     const q = bookmarkQuery.trim().toLowerCase();
     let list = bookmarksBar;
