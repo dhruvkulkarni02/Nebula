@@ -1,5 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Ask main process synchronously for the webview preload path (avoids requiring path module here)
+let __nebula_webview_preload_path = '';
+try {
+  __nebula_webview_preload_path = ipcRenderer.sendSync('nebula-get-webview-preload-path') || '';
+  try { console.log('[Preload API] sync got webview preload path ->', __nebula_webview_preload_path); } catch {}
+} catch (e) {
+  try { console.warn('[Preload API] failed to sync webview preload path', e); } catch {}
+}
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -101,17 +110,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Back-compat: direct remove if the same handler function reference was passed
   removeShortcutListener: (callback) => ipcRenderer.removeListener('shortcut', callback),
 
-  // WebView preload path (absolute filesystem path). Return a plain path (not file://)
-  getWebviewPreloadPath: () => {
-    try {
-      // Use absolute path for Electron webview preload
-      const path = require('path');
-      const absPath = path.resolve(__dirname, 'webview-preload.js');
-  try { console.log('[Preload API] getWebviewPreloadPath ->', absPath); } catch {}
-      // Return filesystem path (webview expects an absolute path, not a file:// URL)
-      return absPath;
-    } catch {
-      return '';
-    }
-  },
+    // WebView preload path (absolute filesystem path). Return a plain path (not file://)
+    getWebviewPreloadPath: () => {
+      try {
+        return __nebula_webview_preload_path;
+      } catch {
+        return '';
+      }
+    },
 });

@@ -2,6 +2,17 @@ const { app, BrowserWindow, BrowserView, session, ipcMain, shell } = require('el
 const path = require('path');
 const fs = require('fs');
 
+// Synchronous IPC for renderer/preload to fetch the absolute webview preload path
+try {
+  ipcMain.on('nebula-get-webview-preload-path', (event) => {
+    try {
+      event.returnValue = path.resolve(__dirname, 'webview-preload.js');
+    } catch (e) {
+      event.returnValue = '';
+    }
+  });
+} catch (e) {}
+
 // Keep a global reference of the window object
 let mainWindow;
 let settingsWindow;

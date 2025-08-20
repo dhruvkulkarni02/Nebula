@@ -22,17 +22,21 @@
       if (state.accum >= THRESHOLD) {
         state.accum = 0; state.cooldownUntil = now + COOLDOWN;
         // right -> back
-        try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'right'); } catch {}
-        try { window.parent.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
-        try { window.top.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
-        try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
+    try { console.log('[webview-preload] detected swipe right -> history.back()'); } catch {}
+    try { if (window.history && typeof window.history.back === 'function') window.history.back(); } catch (e) { try { console.warn('[webview-preload] history.back failed', e); } catch {} }
+    try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'right'); } catch {}
+    try { window.parent.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
+    try { window.top.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
+    try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
       } else if (state.accum <= -THRESHOLD) {
         state.accum = 0; state.cooldownUntil = now + COOLDOWN;
         // left -> forward
-        try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'left'); } catch {}
-        try { window.parent.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
-        try { window.top.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
-        try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
+    try { console.log('[webview-preload] detected swipe left -> history.forward()'); } catch {}
+    try { if (window.history && typeof window.history.forward === 'function') window.history.forward(); } catch (e) { try { console.warn('[webview-preload] history.forward failed', e); } catch {} }
+    try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'left'); } catch {}
+    try { window.parent.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
+    try { window.top.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
+    try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
       }
     } catch {}
   }

@@ -4,6 +4,9 @@ import '../styles/WebView.css';
 
 const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable, onNavAvailable, onNavStateChange, settings }) => {
   const webviewRef = useRef(null);
+  const isLoadingRef = useRef(false);
+  const queuedSwipeRef = useRef('');
+  const [swipeIndicator, setSwipeIndicator] = useState({ dir: '', visible: false, ignored: false });
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -180,6 +183,16 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       try { onProgressChange && onProgressChange(100); } catch {}
       try { onLoadingChange && onLoadingChange(false); } catch {}
       setHasError(false);
+      // clear loading state and process any queued swipe
+      try { isLoadingRef.current = false; } catch {}
+      try {
+        const q = queuedSwipeRef.current;
+        if (q) {
+          queuedSwipeRef.current = '';
+          try { console.log('Processing queued swipe after load:', q); } catch {}
+          processSwipe(q);
+        }
+      } catch {}
     };
 
     const handlePageTitle = () => {
@@ -198,6 +211,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       try { onLoadingChange && onLoadingChange(true); } catch {}
   try { onNavStateChange && onNavStateChange({ canGoBack: !!webview.canGoBack(), canGoForward: !!webview.canGoForward() }); } catch {}
       setHasError(false);
+  try { isLoadingRef.current = true; } catch {}
     };
 
     const handleLoadStop = () => {
@@ -206,6 +220,16 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       try { onProgressChange && onProgressChange(100); } catch {}
       try { onLoadingChange && onLoadingChange(false); } catch {}
   try { onNavStateChange && onNavStateChange({ canGoBack: !!webview.canGoBack(), canGoForward: !!webview.canGoForward() }); } catch {}
+      try { isLoadingRef.current = false; } catch {}
+      // If load stopped and we have a queued swipe, process it (but keep cooldown semantics)
+      try {
+        const q = queuedSwipeRef.current;
+        if (q) {
+          queuedSwipeRef.current = '';
+          try { console.log('Processing queued swipe after load stop:', q); } catch {}
+          processSwipe(q);
+        }
+      } catch {}
     };
 
     const handleFailLoad = (event) => {
@@ -295,6 +319,63 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   let wheelCooldownUntil = 0;
   const wheelThreshold = 150; // more sensitive
   const wheelCooldownMs = 350;
+  // Central swipe cooldown to dedupe duplicate messages coming from multiple layers
+  // (guest sendToHost + postMessage + renderer/main synthesis). This ensures
+  // one physical gesture triggers at most one navigation action per cooldown window.
+  const SWIPE_COOLDOWN_MS = 600;
+  let lastSwipeAt = 0;
+  const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const processSwipe = (dir) => {
+    try {
+      const now = nowMs();
+      if (now - lastSwipeAt < SWIPE_COOLDOWN_MS) {
+        try { console.log('Swipe ignored due to cooldown (ms):', Math.round(now - lastSwipeAt)); } catch {}
+        return false;
+      }
+
+      const canBack = !!(webview && webview.canGoBack && webview.canGoBack());
+      const canForward = !!(webview && webview.canGoForward && webview.canGoForward());
+      try { console.log('Processing swipe (pre-check):', dir, 'canBack=', canBack, 'canForward=', canForward); } catch {}
+
+      // If there's nothing to do, show a ghost indicator briefly and don't consume cooldown
+      if (!canBack && !canForward) {
+        try { console.log('Swipe ignored: no history available for', dir); } catch {}
+        try { setSwipeIndicator({ dir, visible: true, ignored: true }); } catch {}
+        setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+        return false;
+      }
+
+      // Mark cooldown only when we are actually going to attempt navigation
+      lastSwipeAt = now;
+
+      try { console.log('Processing swipe:', dir, 'canBack=', canBack, 'canForward=', canForward); } catch {}
+
+      const tryBack = () => {
+        if (canBack) {
+          try { webview.goBack(); return true; } catch (err) { console.warn('goBack failed', err); }
+        }
+        try { webview.executeJavaScript && webview.executeJavaScript('history.back();').catch(()=>{}); } catch {}
+        return false;
+      };
+      const tryForward = () => {
+        if (canForward) {
+          try { webview.goForward(); return true; } catch (err) { console.warn('goForward failed', err); }
+        }
+        try { webview.executeJavaScript && webview.executeJavaScript('history.forward();').catch(()=>{}); } catch {}
+        return false;
+      };
+
+      if (dir === 'right') {
+        if (!tryBack()) tryForward();
+      } else if (dir === 'left') {
+        if (!tryForward()) tryBack();
+      }
+      return true;
+    } catch (err) {
+      console.warn('processSwipe error', err);
+      return false;
+    }
+  };
     const handleWheel = (e) => {
       try {
   console.log('WebView element wheel event:', { dx: e.deltaX, dy: e.deltaY });
@@ -330,14 +411,21 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     // Listen for ipc messages sent from guest preload via ipcRenderer.sendToHost
     const handleIpcMessage = (e) => {
       try {
-  console.log('WebView ipc-message received:', e && e.channel, e && e.args);
+        try { console.log('WebView ipc-message received:', e && e.channel, e && e.args); } catch {}
         if (e?.channel === 'nebula-swipe') {
           const dir = (e?.args && e.args[0]) || '';
-          if (dir === 'right') {
-            try { if (webview.canGoBack && webview.canGoBack()) webview.goBack(); } catch {}
-          } else if (dir === 'left') {
-            try { if (webview.canGoForward && webview.canGoForward()) webview.goForward(); } catch {}
-          }
+          try {
+            // If the webview is currently loading, queue the swipe to avoid navigation errors
+            if (isLoadingRef.current) {
+              queuedSwipeRef.current = dir;
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+            } else {
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              processSwipe(dir);
+            }
+          } catch (err) { console.warn('ipc-message handler error', err); }
         }
       } catch {}
     };
@@ -346,14 +434,32 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     // Receive synthesized swipe messages from the guest page's preload via postMessage
     const handleMessage = (event) => {
       try {
-  console.log('WebView host message event:', event && event.data);
+        try { console.log('WebView host message event:', event && event.data); } catch {}
         const data = event?.data || {};
         if (data && data.__nebulaSwipe === 'right') {
-          // right -> back
-          try { if (webview.canGoBack && webview.canGoBack()) webview.goBack(); } catch {}
+          try {
+            if (isLoadingRef.current) {
+              queuedSwipeRef.current = 'right';
+              try { setSwipeIndicator({ dir: 'right', visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+            } else {
+              try { setSwipeIndicator({ dir: 'right', visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              processSwipe('right');
+            }
+          } catch (err) { console.warn(err); }
         } else if (data && data.__nebulaSwipe === 'left') {
-          // left -> forward
-          try { if (webview.canGoForward && webview.canGoForward()) webview.goForward(); } catch {}
+          try {
+            if (isLoadingRef.current) {
+              queuedSwipeRef.current = 'left';
+              try { setSwipeIndicator({ dir: 'left', visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+            } else {
+              try { setSwipeIndicator({ dir: 'left', visible: true, ignored: false }); } catch {}
+              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              processSwipe('left');
+            }
+          } catch (err) { console.warn(err); }
         }
       } catch {}
     };
@@ -498,8 +604,8 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           partition={partitionNameRef.current}
           // Enable experimental web platform features
           experimentalfeatures="false"
-          // Dedicated guest preload for gesture detection; only set if we have a valid file:// URL
-          {...(wvPreload ? { preload: wvPreload } : {})}
+          // Dedicated guest preload for gesture detection; webview expects a file:// URL
+          preload={wvPreload ? `file://${wvPreload}` : undefined}
         />
       )}
       
@@ -508,6 +614,12 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
         onClose={() => setShowFind(false)}
         webviewRef={webviewRef}
       />
+      {/* Swipe indicator overlay */}
+      {swipeIndicator && swipeIndicator.visible && (
+        <div className={`swipe-indicator ${swipeIndicator.dir === 'left' ? 'left' : 'right'} visible`} aria-hidden>
+          <div className={`arrow ${swipeIndicator.ignored ? 'ghost' : ''}`}>{swipeIndicator.dir === 'left' ? '→' : '←'}</div>
+        </div>
+      )}
     </div>
   );
 };

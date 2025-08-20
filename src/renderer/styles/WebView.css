@@ -206,6 +206,38 @@
   border-color: var(--border);
 }
 
+/* Swipe indicator shown briefly when a swipe gesture is detected */
+.swipe-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+  opacity: 0;
+}
+.swipe-indicator.visible { opacity: 1; }
+.swipe-indicator.left { left: 12px; }
+.swipe-indicator.right { right: 12px; }
+.swipe-indicator .arrow {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 18px;
+}
+.swipe-indicator .arrow.ghost { opacity: 0.35; }
+
+
 .certificate-error {
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
   border: 1px solid #fecaca;
