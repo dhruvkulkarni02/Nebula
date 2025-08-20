@@ -101,12 +101,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Back-compat: direct remove if the same handler function reference was passed
   removeShortcutListener: (callback) => ipcRenderer.removeListener('shortcut', callback),
 
-  // WebView preload path (absolute)
+  // WebView preload path (absolute filesystem path). Return a plain path (not file://)
   getWebviewPreloadPath: () => {
     try {
-      // Return a file:// URL; <webview preload> only accepts file URLs
-      const dir = String(__dirname || '').replace(/\\/g, '/');
-      return 'file://' + dir + '/webview-preload.js';
+      // Use absolute path for Electron webview preload
+      const path = require('path');
+      const absPath = path.resolve(__dirname, 'webview-preload.js');
+  try { console.log('[Preload API] getWebviewPreloadPath ->', absPath); } catch {}
+      // Return filesystem path (webview expects an absolute path, not a file:// URL)
+      return absPath;
     } catch {
       return '';
     }

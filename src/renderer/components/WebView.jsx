@@ -11,7 +11,23 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [showAddTile, setShowAddTile] = useState(false);
   const [tileForm, setTileForm] = useState({ title: '', url: '' });
   const partitionNameRef = useRef('webview');
-  const [wvPreload, setWvPreload] = useState('');
+  const [wvPreload, setWvPreload] = useState(() => {
+    try {
+      const p = window.electronAPI?.getWebviewPreloadPath?.();
+  try { console.log('[WebView] initial getWebviewPreloadPath ->', p); } catch {}
+      if (!p || typeof p !== 'string') return '';
+      // Normalize: if caller returned file:// URL, strip scheme to get filesystem path
+      try {
+        if (p.startsWith('file://')) {
+          const url = new URL(p);
+          return url.pathname;
+        }
+      } catch {}
+      return p;
+    } catch {
+      return '';
+    }
+  });
 
   // Decide partition once per window for private browsing
   useEffect(() => {
@@ -26,8 +42,11 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       // Resolve webview preload path once on mount
       try {
         const p = window.electronAPI?.getWebviewPreloadPath?.();
-        if (p && typeof p === 'string' && p.startsWith('file:')) {
-          setWvPreload(p);
+        if (p && typeof p === 'string') {
+          let normalized = p;
+          try { if (p.startsWith('file://')) normalized = new URL(p).pathname; } catch {}
+          console.log('Resolved webview preload path (normalized):', normalized);
+          setWvPreload(normalized);
         }
       } catch {}
     } catch {}
@@ -209,8 +228,38 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
 
     // Wait for webview to be ready
     const handleDomReady = () => {
-      console.log('WebView DOM ready');
+  console.log('WebView DOM ready - url:', url, 'preload:', wvPreload);
       // Don't set URL here - it's already set via the src attribute
+      try {
+        const wv = webviewRef.current;
+        if (wv && !wv.__nebulaGestureInjected) {
+          // Inject a minimal guest-side wheel listener so we can detect horizontal trackpad swipes
+          const script = `(() => {
+            try {
+              if (window.__nebulaGestureInjected) return;
+              window.__nebulaGestureInjected = true;
+              let accum = 0; let cooldownUntil = 0;
+              const THRESHOLD = 120; const COOLDOWN = 400;
+              const onWheel = (e) => {
+                try {
+                  const dx = (typeof e.deltaX === 'number') ? e.deltaX : 0;
+                  const dy = (typeof e.deltaY === 'number') ? e.deltaY : 0;
+                  if (Math.abs(dx) <= Math.abs(dy)) return;
+                  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                  if (now < cooldownUntil) return;
+                  accum += dx;
+                  if (accum >= THRESHOLD) { accum = 0; cooldownUntil = now + COOLDOWN; try { window.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {} }
+                  else if (accum <= -THRESHOLD) { accum = 0; cooldownUntil = now + COOLDOWN; try { window.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {} }
+                } catch {}
+              };
+              window.addEventListener('wheel', onWheel, { passive: true, capture: true });
+              document.addEventListener('wheel', onWheel, { passive: true, capture: true });
+            } catch (e) {}
+          })();`;
+          try { wv.executeJavaScript(script).catch(() => {}); } catch {}
+          wv.__nebulaGestureInjected = true;
+        }
+      } catch (e) {}
     };
 
     const handleFaviconUpdated = (event) => {
@@ -248,6 +297,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const wheelCooldownMs = 350;
     const handleWheel = (e) => {
       try {
+  console.log('WebView element wheel event:', { dx: e.deltaX, dy: e.deltaY });
         // Only consider horizontal gestures
         const absX = Math.abs(e.deltaX);
         const absY = Math.abs(e.deltaY);
@@ -280,6 +330,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     // Listen for ipc messages sent from guest preload via ipcRenderer.sendToHost
     const handleIpcMessage = (e) => {
       try {
+  console.log('WebView ipc-message received:', e && e.channel, e && e.args);
         if (e?.channel === 'nebula-swipe') {
           const dir = (e?.args && e.args[0]) || '';
           if (dir === 'right') {
@@ -295,6 +346,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     // Receive synthesized swipe messages from the guest page's preload via postMessage
     const handleMessage = (event) => {
       try {
+  console.log('WebView host message event:', event && event.data);
         const data = event?.data || {};
         if (data && data.__nebulaSwipe === 'right') {
           // right -> back
@@ -354,6 +406,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
 
   return (
     <div className="webview-container">
+  {(() => { try { console.log('[WebView] rendering webview with preload ->', wvPreload); } catch {} return null; })()}
       {/* Spinner overlay removed: progress now shown as a slim bar in the navigation area */}
       
   {!url || url === 'about:blank' ? (
@@ -428,7 +481,6 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           )}
         </div>
       ) : (
-        wvPreload ? (
         <webview
           ref={webviewRef}
           src={url}
@@ -446,11 +498,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           partition={partitionNameRef.current}
           // Enable experimental web platform features
           experimentalfeatures="false"
-          // Dedicated guest preload for gesture detection; must be a file:// URL
-          preload={wvPreload}
-        />) : (
-          <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>Loading…</div>
-        )
+          // Dedicated guest preload for gesture detection; only set if we have a valid file:// URL
+          {...(wvPreload ? { preload: wvPreload } : {})}
+        />
       )}
       
       <FindInPage

@@ -62,7 +62,7 @@ function processWheelForSwipe(targetWebContents, sourceKey, deltaX) {
     if (now < st.cooldownUntil) return;
     // Accumulate horizontal deltas; positive = right, negative = left
     st.accum += (typeof deltaX === 'number' ? deltaX : 0);
-    const threshold = 350; // tuned for macOS trackpads
+  const threshold = 220; // tuned for macOS trackpads (lower for easier detection during testing)
     if (st.accum >= threshold) {
       st.accum = 0;
       st.cooldownUntil = now + 450;
@@ -1531,14 +1531,19 @@ app.on('web-contents-created', (event, contents) => {
     // Fallback: synthesize swipe from horizontal wheel deltas in webview
     try {
       contents.on('wheel', (_ev, deltaX, deltaY, deltaZ) => {
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-          const host = contents.hostWebContents || null;
-          if (host && !host.isDestroyed()) {
-            processWheelForSwipe(host, `wv-${contents.id}`, deltaX);
+        try {
+          console.log(`[Gesture][WebView ${contents.id}] wheel dx=${deltaX}, dy=${deltaY}`);
+          if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            const host = contents.hostWebContents || null;
+            if (host && !host.isDestroyed()) {
+              processWheelForSwipe(host, `wv-${contents.id}`, deltaX);
+            }
           }
+        } catch (err) {
+          console.warn('Error in webview wheel handler:', err);
         }
       });
-    } catch {}
+    } catch (e) { console.warn('Failed to attach wheel handler to webview contents:', e); }
 
   // Forward keyboard shortcuts from webview to host so they work when webview is focused
     try {

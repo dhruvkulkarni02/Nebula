@@ -216,6 +216,33 @@ const BrowserInterface = ({
     return () => { try { window.electronAPI?.removeSwipeGestureListener?.(handler); } catch {} };
   }, []);
 
+  // Renderer-level fallback: capture horizontal wheel gestures at top-level (capture phase)
+  useEffect(() => {
+    let accum = 0;
+    let cooldownUntil = 0;
+    const TH = 120; // threshold
+    const COOLDOWN_MS = 400;
+    const onWheel = (e) => {
+      try {
+        const dx = typeof e.deltaX === 'number' ? e.deltaX : 0;
+        const dy = typeof e.deltaY === 'number' ? e.deltaY : 0;
+        if (Math.abs(dx) <= Math.abs(dy)) return;
+        const now = performance.now ? performance.now() : Date.now();
+        if (now < cooldownUntil) return;
+        accum += dx;
+        if (accum >= TH) {
+          accum = 0; cooldownUntil = now + COOLDOWN_MS;
+          try { navFnsRef.current?.goBack?.(); } catch {}
+        } else if (accum <= -TH) {
+          accum = 0; cooldownUntil = now + COOLDOWN_MS;
+          try { navFnsRef.current?.goForward?.(); } catch {}
+        }
+      } catch {}
+    };
+    window.addEventListener('wheel', onWheel, { passive: true, capture: true });
+    return () => window.removeEventListener('wheel', onWheel, { capture: true });
+  }, []);
+
 
   const handleNewTab = () => {
     const newTab = {
