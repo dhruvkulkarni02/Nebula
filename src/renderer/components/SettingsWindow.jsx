@@ -98,13 +98,23 @@ export default function SettingsWindow() {
 
           {tab === 'homepage' && (
             <div>
+              <Section title="Default search engine">
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {['google','duckduckgo','brave'].map((eng) => (
+                    <label key={eng} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: (settings.defaultSearchEngine||'google') === eng ? '1px solid var(--accent)' : '1px solid transparent', background: (settings.defaultSearchEngine||'google') === eng ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent', cursor: 'pointer' }} onClick={() => apply({ defaultSearchEngine: eng })}>
+                      <input type="radio" name="defaultSearchEngine" checked={(settings.defaultSearchEngine||'google')===eng} readOnly style={{display:'none'}} />
+                      <div style={{ fontWeight:600, textTransform:'capitalize' }}>{eng === 'duckduckgo' ? 'DuckDuckGo' : eng === 'brave' ? 'Brave' : 'Google'}</div>
+                    </label>
+                  ))}
+                </div>
+              </Section>
               <Section title="Wallpaper URL">
                 <input style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--panel)', color: 'var(--fg)' }}
                        placeholder="https://…" value={settings.homeWallpaper || ''}
                        onChange={(e)=>apply({ homeWallpaper: e.target.value })} />
               </Section>
               <Section title="Home Tiles">
-                <button onClick={() => apply({ homeTiles: [...(settings.homeTiles||[]), { title: 'New', url: 'https://', icon: '' }] })}>Add Tile</button>
+                <button className="btn" style={{ width: '100%', textAlign: 'center' }} onClick={() => apply({ homeTiles: [...(settings.homeTiles||[]), { title: 'New', url: 'https://', icon: '' }] })}>Add Tile</button>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
                   {(settings.homeTiles||[]).map((tile, i) => (
                     <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 10, background: 'var(--panel)', display: 'grid', gap: 6 }}>
@@ -118,7 +128,7 @@ export default function SettingsWindow() {
                         const arr=[...(settings.homeTiles||[])]; arr[i]={...arr[i], icon:e.target.value}; apply({ homeTiles: arr });
                       }} style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color:'var(--fg)' }} />
                       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                        <button onClick={()=>{
+                        <button className="btn secondary" onClick={() =>{
                           const arr=[...(settings.homeTiles||[])]; arr.splice(i,1); apply({ homeTiles: arr });
                         }} style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)' }}>Remove</button>
                       </div>
@@ -176,7 +186,7 @@ export default function SettingsWindow() {
           {tab === 'downloads' && (
             <div>
               <Section title="Clear Downloads">
-                <button onClick={()=>window.electronAPI?.clearDownloads?.()}>Clear List</button>
+                <button className="btn" style={{ width: '100%', textAlign: 'center' }} onClick={()=>window.electronAPI?.clearDownloads?.()}>Clear List</button>
               </Section>
             </div>
           )}

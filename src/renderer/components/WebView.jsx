@@ -16,6 +16,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [showFind, setShowFind] = useState(false);
   const [showAddTile, setShowAddTile] = useState(false);
   const [tileForm, setTileForm] = useState({ title: '', url: '' });
+  const [tileContextMenu, setTileContextMenu] = useState({ visible: false, x: 0, y: 0, index: -1 });
   const partitionNameRef = useRef('webview');
   const [wvPreload, setWvPreload] = useState(() => {
     try {
@@ -568,7 +569,8 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
               <div style={{ fontWeight:600, fontSize:14, textAlign:'center' }}>Add Tile</div>
             </button>
             {(settings?.homeTiles || []).map((tile, i) => (
-              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
+              <div key={i} style={{ position: 'relative' }}>
+              <button onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} onContextMenu={(e)=>{ e.preventDefault(); setTileContextMenu({ visible:true, x: e.clientX, y: e.clientY, index: i }); }} style={{
                 display:'flex', flexDirection:'column', alignItems:'center', gap:8,
                 background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
               }}>
@@ -579,6 +581,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                 )}
                 <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
               </button>
+              </div>
             ))}
           </div>
 
@@ -615,6 +618,18 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
               </div>
             </div>
           )}
+          {/* Tile context menu (Edit / Remove) */}
+          {tileContextMenu.visible && tileContextMenu.index >= 0 && (function(){
+            const t = (settings?.homeTiles || [])[tileContextMenu.index];
+            return (
+              <div style={{ position:'fixed', left: tileContextMenu.x, top: tileContextMenu.y, background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius:8, padding:6, zIndex:9999 }} onMouseLeave={()=>setTileContextMenu({ visible:false, x:0, y:0, index:-1 })}>
+                <div style={{ display:'flex', flexDirection:'column', minWidth:140 }}>
+                  <button onClick={()=>{ try{ setTileForm({ title: t?.title || '', url: t?.url || '' }); setShowAddTile(true); } finally { setTileContextMenu({ visible:false, x:0, y:0, index:-1 }); } }} style={{ padding:'8px 10px', background:'transparent', border:'none', color:'var(--fg)', textAlign:'left', cursor:'pointer' }}>Edit</button>
+                  <button onClick={async ()=>{ try{ const cur = (settings?.homeTiles || []).slice(); cur.splice(tileContextMenu.index, 1); await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: cur }); } catch{} finally{ setTileContextMenu({ visible:false, x:0, y:0, index:-1 }); } }} style={{ padding:'8px 10px', background:'transparent', border:'none', color:'var(--fg)', textAlign:'left', cursor:'pointer' }}>Remove</button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ) : (
         <webview
