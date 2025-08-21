@@ -281,5 +281,4 @@
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   transform: translateY(-1px);
 }
-.engine-badge { background: transparent; border: none; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14px }
-.engine-badge:hover { background: #f8fafc }
+.engine-badge { display: none; }

@@ -289,18 +289,7 @@ const NavigationBar = ({
     return () => document.removeEventListener('mousedown', onDocClick, true);
   }, []);
 
-  const [showEngineMenu, setShowEngineMenu] = useState(false);
-  const changeDefaultEngine = async (engine) => {
-    try {
-      const s = (await window.electronAPI?.getSettings?.()) || {};
-      const next = { ...(s || {}), defaultSearchEngine: engine };
-      await window.electronAPI?.updateSettings?.(next);
-      setSettings(next);
-    } catch (e) {
-      console.error('Failed to change default search engine', e);
-    }
-    setShowEngineMenu(false);
-  };
+  // engine picker intentionally only in Settings panel
 
   const togglePermission = async (perm) => {
     try {
@@ -420,21 +409,7 @@ const NavigationBar = ({
           }
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button type="button" className="engine-badge" title="Default search engine" onClick={(e) => { e.preventDefault(); setShowEngineMenu(v => !v); setShowShieldMenu(false); setShowPageInfo(false); }}>
-            {engineBadge}
-          </button>
-          {showEngineMenu && (
-            <div ref={engineMenuRef} style={{ position: 'absolute', top: 44, left: 70, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 6, minWidth: 180 }}>
-              <div style={{ fontSize: 13, marginBottom: 6, color: '#0f172a' }}>Default search engine</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <button className="btn" onClick={() => changeDefaultEngine('google')}>G &nbsp; Google</button>
-                <button className="btn" onClick={() => changeDefaultEngine('duckduckgo')}>🦆 &nbsp; DuckDuckGo</button>
-                <button className="btn" onClick={() => changeDefaultEngine('brave')}>🦁 &nbsp; Brave</button>
-              </div>
-            </div>
-          )}
-        </div>
+  {/* search engine picker intentionally not in the nav bar; use Settings */}
         {/* Shield / blocked count */}
         {currentUrl && currentUrl !== 'about:blank' && (
           <button

@@ -382,6 +382,7 @@ const BrowserInterface = ({
     dragIndexRef.current = null;
     draggingTabIdRef.current = null;
     setIsDraggingTab(false);
+  setDraggedTabId(null);
   };
 
   const handleTabUrlChange = (tabId, newUrl, title = '') => {
@@ -592,7 +593,7 @@ const BrowserInterface = ({
         {displayTabs.map((tab, idx) => (
           <div
             key={tab.id}
-            className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''}`}
+            className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''} ${draggedTabId === tab.id ? 'dragging' : ''}`}
             onClick={() => handleSwitchTab(tab.id)}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -746,7 +747,7 @@ const BrowserInterface = ({
               {displayTabs.map((tab, idx) => (
                 <div
                   key={tab.id}
-                  className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''}`}
+                  className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''} ${draggedTabId === tab.id ? 'dragging' : ''}`}
                   onClick={() => handleSwitchTab(tab.id)}
                   onContextMenu={(e) => { e.preventDefault(); setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id }); }}
                   draggable
@@ -851,10 +852,7 @@ const BrowserInterface = ({
 
       {/* Tab Context Menu */}
       {tabMenu.open && (
-        <div
-          style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 1000, padding: 6, minWidth: 180 }}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="context-menu" style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, zIndex: 1000, minWidth: 180 }} onClick={(e) => e.stopPropagation()}>
           <MenuItem label={(() => {
             const t = tabs.find(t => t.id === tabMenu.tabId);
             return t?.pinned ? 'Unpin tab' : 'Pin tab';
@@ -873,7 +871,7 @@ const BrowserInterface = ({
             setTimeout(() => { audioFns.toggleMute && audioFns.toggleMute(); }, 0);
             setTabMenu({ open: false, x: 0, y: 0, tabId: null });
           }} />
-          <hr style={{ border: 'none', height: 1, background: '#e2e8f0', margin: '6px 0' }} />
+          <hr style={{ border: 'none', height: 1, background: 'var(--border)', margin: '6px 0' }} />
           <MenuItem label="Close tab" onClick={() => { handleCloseTab(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
           <MenuItem label="Close others" onClick={() => { handleCloseOthers(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
           <MenuItem label="Close tabs to the right" onClick={() => { handleCloseToRight(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
@@ -886,9 +884,9 @@ const BrowserInterface = ({
 // Lightweight menu item component
 const MenuItem = ({ label, onClick }) => (
   <div
+    className="menu-item"
     onClick={onClick}
-    style={{ padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#0f172a' }}
-    onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--accent) 8%, transparent)'; }}
     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
   >
     {label}
