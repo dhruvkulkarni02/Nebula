@@ -17,6 +17,7 @@ const NavigationBar = ({
   onShowDownloads,
   onOpenSettings,
   settings: settingsProp,
+  onToggleReader,
 }) => {
   const [urlInput, setUrlInput] = useState(currentUrl);
   const [isBookmarked, setIsBookmarked] = useState(false);
@@ -563,6 +564,7 @@ const NavigationBar = ({
         {(settings?.toolbarButtons?.history !== false) && (<button className="menu-button" title="View history" onClick={onShowHistory}>📖</button>)}
         {(settings?.toolbarButtons?.private !== false) && (<button className="menu-button" title="New private window" onClick={() => window.electronAPI?.openPrivateWindow?.()}>🕶️</button>)}
         {(settings?.toolbarButtons?.find !== false) && (<button className="menu-button" title="Find in page (Ctrl+F)" onClick={onOpenFind} disabled={!currentUrl || currentUrl === 'about:blank'}>🔍</button>)}
+    <button className="menu-button" title="Reader mode" onClick={() => onToggleReader && onToggleReader()} disabled={!currentUrl || currentUrl === 'about:blank'}>📖</button>
         {(settings?.toolbarButtons?.downloads !== false) && (<button className="menu-button" title="Downloads" onClick={onShowDownloads}>📥</button>)}
         {/* Add to Home (start page tile) */}
         <button

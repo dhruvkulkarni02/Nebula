@@ -15,3 +15,39 @@ body {
   height: 100vh;
   width: 100vw;
 }
+
+:root {
+  /* Palette */
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --fg: #0f172a;
+  --muted: #f1f5f9;
+  --border: #e6edf3;
+  --accent: #0ea5e9;
+  --card-bg: color-mix(in srgb, var(--panel) 92%, var(--bg));
+
+  /* Motion */
+  --motion-speed: 160ms;
+}
+
+html[data-theme='dark'] {
+  --bg: #0b1220;
+  --panel: #0f1724;
+  --fg: #e6eef8;
+  --muted: #071124;
+  --border: #122233;
+  --accent: #1fb6ff;
+  --card-bg: color-mix(in srgb, var(--panel) 92%, var(--bg));
+}
+
+/* Respect reduce-motion (user preference or explicit attribute) */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+html[data-reduce-motion='true'] { * { transition: none !important; animation: none !important; } }
+
+/* Accessible focus ring for interactive elements */
+:where(button,a,input,textarea,select,[tabindex]):focus-visible {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 6px;
+}

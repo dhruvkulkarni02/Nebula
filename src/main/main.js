@@ -18,7 +18,8 @@ let mainWindow;
 let settingsWindow;
 let currentBrowserView;
 // Simple content blocking state and helpers
-let adBlockEnabled = false;
+// Enable ad blocking by default to reduce noisy ads during dev and testing
+let adBlockEnabled = true;
 let adBlockStats = { blocked: 0, allowed: 0 };
 let adBlockAllowlist = new Set(); // hostnames for which blocking is disabled
 const AD_HOST_SUFFIXES = [
@@ -37,9 +38,60 @@ function hostMatchesSuffix(host, suffix) {
 function shouldBlockUrl(u) {
   const h = hostnameFromUrl(u);
   if (!h) return false;
+
+  // Block by known ad host suffixes first
   for (const suf of AD_HOST_SUFFIXES) {
     if (hostMatchesSuffix(h, suf)) return true;
   }
+
+  // Additional heuristics for YouTube / googlevideo ad endpoints.
+  // YouTube often serves ad-related requests from a mix of ad-specific hosts
+  // and endpoint paths or query parameters on otherwise normal hosts.
+  try {
+    const url = new URL(u);
+    const host = (url.hostname || '').toLowerCase();
+    const path = (url.pathname || '').toLowerCase();
+    const query = (url.search || '').toLowerCase();
+
+    // Target common YouTube ad endpoints and typical ad-serving paths
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com') || host.includes('googlevideo.com') || host.includes('ytimg.com')) {
+      // Block explicit ad endpoints
+      if (path.startsWith('/get_midroll_info') || path.startsWith('/api/stats/ads') || path.startsWith('/get_video_info')) {
+        return true;
+      }
+
+      // Path-based heuristics
+      if (path.includes('/ad/') || path.includes('ad_break') || path.includes('/ads') || path.includes('/adsrc') || path.includes('/pagead/')) {
+        return true;
+      }
+
+      // Query-parameter heuristics: look for ad-related params
+      const adParams = ['adformat', 'adurl', 'ad_unit', 'adunit', 'ad_tag', 'ad_k', 'ad_type', 'adbreak', 'ad_break', 'adsid', 'adsrc', 'ads'];
+      for (const p of adParams) {
+        if (query.includes(p + '=') || query.includes('&' + p + '=')) {
+          return true;
+        }
+      }
+
+      // googlevideo sometimes hosts ad streams; if the path or query contains obvious 'ad' markers, block conservatively
+      if (host.endsWith('googlevideo.com') && (path.includes('ad') || query.includes('ad_tag') || query.includes('adformat'))) {
+        return true;
+      }
+    }
+
+    // Common ad-like resource filenames (ad.js, ad-loader, ads-..., doubleclick, etc.)
+    try {
+      const filename = path.split('/').pop() || '';
+      const lower = filename.toLowerCase();
+      const adNamePatterns = ['ad.js', 'ads.js', 'ads-','adserver','ad_iframe','doubleclick','admanager','pagead','adslot','adthumb','adview'];
+      for (const p of adNamePatterns) {
+        if (lower.includes(p)) return true;
+      }
+    } catch {}
+  } catch (e) {
+    // ignore parse errors and fall through
+  }
+
   return false;
 }
 
@@ -445,6 +497,33 @@ function createSettingsWindow() {
 ipcMain.handle('open-settings-window', async () => {
   createSettingsWindow();
   return { ok: true };
+});
+
+// Open a dedicated Reader window for sanitized HTML content when in-page injection
+ipcMain.handle('open-reader-window', async (_event, htmlContent) => {
+  try {
+    if (!htmlContent) return { ok: false, error: 'empty' };
+    const win = new BrowserWindow({
+      width: 900,
+      height: 800,
+      title: 'Reader',
+      modal: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        enableRemoteModule: false,
+        // No preload needed; content is static
+      }
+    });
+    // Load the provided HTML via a data URL (safer than writing to disk)
+    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(String(htmlContent));
+    await win.loadURL(dataUrl);
+    win.show();
+    return { ok: true };
+  } catch (e) {
+    console.error('Failed to open reader window:', e);
+    return { ok: false, error: String(e) };
+  }
 });
 
 function configureSessionSecurity() {

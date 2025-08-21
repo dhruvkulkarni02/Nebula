@@ -208,35 +208,66 @@
 
 /* Swipe indicator shown briefly when a swipe gesture is detected */
 .swipe-indicator {
-  position: absolute;
+  position: fixed;
   top: 50%;
-  transform: translateY(-50%);
-  z-index: 120;
+  /* keep the indicator vertically centered and avoid changing horizontal
+     translate during the show/hide animation (this removed the "pop in"
+     jump inside the window border). Horizontal position is provided by
+     the .left / .right rules below. */
+  transform: translateY(-50%) scale(1);
+  z-index: 99999; /* ensure it's above window chrome and other overlays */
+  pointer-events: none;
+  background: var(--panel, rgba(255, 255, 255, 0.95));
+  color: var(--fg, #222);
+  border: 1px solid var(--border, #e5e5ea);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease;
-  opacity: 0;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+  animation: swipeIndicatorFade 0.45s cubic-bezier(0.2, 0, 0, 1);
 }
 .swipe-indicator.visible { opacity: 1; }
-.swipe-indicator.left { left: 12px; }
-.swipe-indicator.right { right: 12px; }
+.swipe-indicator.left { left: 18px; transform: translateY(-50%); }
+.swipe-indicator.right { right: 18px; left: auto; transform: translateY(-50%); }
 .swipe-indicator .arrow {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  font-size: 18px;
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--fg, #222);
 }
-.swipe-indicator .arrow.ghost { opacity: 0.35; }
 
+@keyframes swipeIndicatorFade {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.82);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.82);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .swipe-indicator {
+    background: var(--panel, rgba(35, 35, 43, 0.9));
+    color: var(--fg, #fff);
+    border: 1px solid var(--border, #333);
+  }
+  
+  .swipe-indicator .arrow {
+    color: var(--fg, #fff);
+  }
+}
 
 .certificate-error {
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);

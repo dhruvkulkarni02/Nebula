@@ -6,13 +6,13 @@
 .settings-body{padding:16px;display:flex;flex-direction:column;gap:14px;color:var(--fg);background:var(--bg)}
 .setting-item{display:flex;flex-direction:column;gap:6px}
 .setting-label{font-size:13px;color:#334155}
-.setting-input{padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:#f8fafc;color:#0f172a}
+.setting-input{padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--panel);color:var(--fg)}
 .setting-check{font-size:13px;color:#334155;display:flex;align-items:center;gap:8px}
 .settings-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border)}
-.btn{padding:8px 12px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer;font-size:13px}
-.btn.primary{background:#3b82f6;border-color:#2563eb;color:#fff}
-.btn.primary:hover{background:#2563eb}
-.btn.secondary{background:#fff;color:#0f172a}
+.btn{padding:10px 14px;border-radius:10px;border:1px solid var(--border);cursor:pointer;font-size:14px}
+.btn.primary{background:var(--accent);border-color:color-mix(in srgb, var(--accent) 85%, black);color:#fff}
+.btn.primary:hover{filter:brightness(.95)}
+.btn.secondary{background:transparent;color:var(--fg);border-color:var(--border)}
 
 .engine-option{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:1px solid transparent;background:transparent;cursor:pointer}
 .engine-option .engine-icon{width:36px;height:36px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-weight:700}

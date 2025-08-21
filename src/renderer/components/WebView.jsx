@@ -6,9 +6,6 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const webviewRef = useRef(null);
   const isLoadingRef = useRef(false);
   const queuedSwipeRef = useRef('');
-  const queuedSwipeTsRef = useRef(0);
-  const guestGestureSeenRef = useRef(false);
-  const lastGuestGestureAtRef = useRef(0);
   const [swipeIndicator, setSwipeIndicator] = useState({ dir: '', visible: false, ignored: false });
   const [loadProgress, setLoadProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
@@ -16,7 +13,6 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [showFind, setShowFind] = useState(false);
   const [showAddTile, setShowAddTile] = useState(false);
   const [tileForm, setTileForm] = useState({ title: '', url: '' });
-  const [tileContextMenu, setTileContextMenu] = useState({ visible: false, x: 0, y: 0, index: -1 });
   const partitionNameRef = useRef('webview');
   const [wvPreload, setWvPreload] = useState(() => {
     try {
@@ -139,6 +135,100 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
         goBack: () => { try { if (wv.canGoBack()) wv.goBack(); } catch {} },
         goForward: () => { try { if (wv.canGoForward()) wv.goForward(); } catch {} },
         reload: () => { try { wv.reload(); } catch {} },
+        // Toggle a simple reader-mode overlay by extracting main article content
+        toggleReader: async () => {
+          try {
+            const w = webviewRef.current;
+            if (!w) return;
+            // Ask the guest to return simplified HTML via executeJavaScript
+            const script = `(() => {
+              try {
+                // Basic readability-like extraction: prefer <article>, then main, then heuristics
+                const pick = el => el ? el.innerHTML : '';
+                const article = document.querySelector('article');
+                if (article) return { title: (document.title||''), html: pick(article) };
+                const main = document.querySelector('main');
+                if (main) return { title: (document.title||''), html: pick(main) };
+                // Fallback: choose the largest <div> by textContent length
+                let best = null; let bestLen = 0;
+                document.querySelectorAll('div').forEach(d => {
+                  const t = (d.textContent||'').trim(); if (t.length > bestLen) { best = d; bestLen = t.length; }
+                });
+                if (best) return { title: (document.title||''), html: pick(best) };
+                return { title: (document.title||''), html: document.body ? document.body.innerHTML : '' };
+              } catch (e) { return { title: document.title||'', html: '' }; }
+            })();`;
+            const res = await w.executeJavaScript(script, true).catch(() => null);
+            if (!res || !res.html) {
+              // Toggle off if no content
+              w.executeJavaScript(`document.documentElement.querySelector('#__nebula_reader')?.remove();`).catch(()=>{});
+              return;
+            }
+            // Inject overlay using an isolated iframe (srcdoc) to avoid site CSS/JS interference
+            const sanitized = res.html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+            const readerHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${(res.title||'')}</title><style>body{font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; color:#111; background:#fff; padding:28px; line-height:1.6; max-width:75ch; margin:28px auto;} h1{font-size:20px; margin-bottom:12px;} img{max-width:100%; height:auto;} a{color:#0066cc;} </style></head><body><h1>${(res.title||'')}</h1><div>${sanitized}</div></body></html>`;
+            const overlay = `(() => {
+              try {
+                const existing = document.getElementById('__nebula_reader');
+                if (existing) { existing.remove(); return 'removed'; }
+                const container = document.createElement('div');
+                container.id = '__nebula_reader';
+                container.style.position = 'fixed';
+                container.style.inset = '6vh 8vw';
+                container.style.overflow = 'hidden';
+                container.style.background = 'transparent';
+                container.style.padding = '0';
+                container.style.borderRadius = '12px';
+                container.style.boxShadow = '0 30px 70px rgba(0,0,0,0.32)';
+                container.style.zIndex = 2147483647;
+                const close = document.createElement('button');
+                close.textContent = 'Close';
+                close.style.position = 'absolute';
+                close.style.right = '12px';
+                close.style.top = '12px';
+                close.style.zIndex = 2147483650;
+                close.onclick = () => container.remove();
+                const iframe = document.createElement('iframe');
+                iframe.setAttribute('sandbox', 'allow-same-origin');
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+                iframe.style.borderRadius = '12px';
+                // Compose minimal wrapper HTML for srcdoc
+                const srcdoc = ${JSON.stringify(readerHtml)};
+                iframe.srcdoc = srcdoc;
+                // Fill container and insert
+                container.appendChild(close);
+                container.appendChild(iframe);
+                document.body.appendChild(container);
+                return 'ok';
+              } catch(e) { return 'fail'; }
+            })();`;
+            const injected = await w.executeJavaScript(overlay).catch(()=>null);
+            // If in-page injection failed (CSP/TrustedTypes), fall back to opening a dedicated reader window via the main API
+            if (!injected || injected === 'fail') {
+              try {
+                if (window.electronAPI && typeof window.electronAPI.openReaderWindow === 'function') {
+                  await window.electronAPI.openReaderWindow(readerHtml);
+                  return;
+                }
+              } catch (e) {}
+            }
+          } catch (e) {}
+        },
+        // Capture a thumbnail of the webview content (returns data URL) — best-effort
+        captureThumbnail: async () => {
+          try {
+            const w = webviewRef.current;
+            if (!w) return null;
+            // Preferred API: webview.capturePage() returns a Promise with NativeImage
+            if (typeof w.capturePage === 'function') {
+              const img = await w.capturePage();
+              try { return img.toDataURL(); } catch { return null; }
+            }
+            return null;
+          } catch (e) { return null; }
+        }
       });
     }
   }, [onNavAvailable, webviewRef.current]);
@@ -260,8 +350,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       // Don't set URL here - it's already set via the src attribute
       try {
         const wv = webviewRef.current;
-        // Only inject the fallback postMessage-based listener when no guest preload exists
-        if (!guestPreloadAvailable && wv && !wv.__nebulaGestureInjected) {
+        if (wv && !wv.__nebulaGestureInjected) {
           // Inject a minimal guest-side wheel listener so we can detect horizontal trackpad swipes
           const script = `(() => {
             try {
@@ -291,6 +380,20 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       } catch (e) {}
     };
 
+    // Inject lightweight ad-hiding CSS for common ad containers to reduce popups
+    const injectAdCss = () => {
+      try {
+        const css = `
+          /* Common ad selectors (non-exhaustive) */
+          [id^=ad-], [id*=ad_], [id*=adslot], [class*=ad-], [class*=ads-], .ad, .ads, .adsbox, .adslot, .ad-banner, .ad-container, .advertisement, .ad-placeholder, .adblock-message, .ad_iframe, iframe[id^=google_ads_iframe] { display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; }
+          .adsbygoogle { display: none !important; }
+        `;
+        const inj = `(function(){try{if(window.__nebula_ad_css_injected) return; const s=document.createElement('style'); s.id='__nebula_ad_css'; s.textContent=${JSON.stringify(css)}; document.head && document.head.appendChild(s); window.__nebula_ad_css_injected = true;}catch(e){}})();`;
+        try { webviewRef.current && webviewRef.current.executeJavaScript(inj).catch(()=>{}); } catch {}
+      } catch {}
+    };
+    try { injectAdCss(); } catch {}
+
     const handleFaviconUpdated = (event) => {
       if (onFaviconChangeRef.current) {
         onFaviconChangeRef.current(event.favicons || []);
@@ -316,14 +419,10 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     webview.addEventListener('page-title-updated', handlePageTitle);
     webview.addEventListener('did-navigate', handleNavigation);
     webview.addEventListener('did-navigate-in-page', handleNavigation);
-  webview.addEventListener('page-favicon-updated', handleFaviconUpdated);
-  webview.addEventListener('permissionrequest', handlePermissionRequest);
+    webview.addEventListener('page-favicon-updated', handleFaviconUpdated);
+    webview.addEventListener('permissionrequest', handlePermissionRequest);
 
-  // If we have a dedicated guest preload file, prefer guest IPC as the
-  // authoritative gesture source and avoid synthesizing gestures here.
-  const guestPreloadAvailable = !!wvPreload;
-
-  // Trackpad horizontal swipe synthesis (renderer-side fallback)
+    // Trackpad horizontal swipe synthesis (renderer-side fallback)
   let wheelAccum = 0;
   let wheelCooldownUntil = 0;
   const wheelThreshold = 150; // more sensitive
@@ -333,11 +432,17 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   // one physical gesture triggers at most one navigation action per cooldown window.
   const SWIPE_COOLDOWN_MS = 600;
   let lastSwipeAt = 0;
+  // Suppression window to ignore duplicate incoming tokens (ipc vs postMessage)
+  const DUP_SUPPRESSION_MS = 180;
+  let lastIncomingAt = 0;
+  let lastIncomingToken = '';
+  // Single hide timeout handle for the indicator to avoid multiple setTimeouts
+  let indicatorHideHandle = null;
   const nowMs = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const processSwipe = (dir) => {
     try {
       const now = nowMs();
-      if (now - lastSwipeAt < SWIPE_COOLDOWN_MS) {
+  if (now - lastSwipeAt < SWIPE_COOLDOWN_MS) {
         try { console.log('Swipe ignored due to cooldown (ms):', Math.round(now - lastSwipeAt)); } catch {}
         return false;
       }
@@ -357,45 +462,35 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       // Mark cooldown only when we are actually going to attempt navigation
       lastSwipeAt = now;
 
-      try { console.log('Processing swipe:', dir, 'canBack=', canBack, 'canForward=', canForward); } catch {}
+  try { console.log('Processing swipe:', dir, 'canBack=', canBack, 'canForward=', canForward); } catch {}
 
       const tryBack = () => {
         if (canBack) {
           try { webview.goBack(); return true; } catch (err) { console.warn('goBack failed', err); }
         }
-        try {
-          if (webview.executeJavaScript) {
-            console.log('[WebView] tryBack: using executeJavaScript fallback -> history.back()');
-            try {
-              webview.executeJavaScript('history.back();').catch(()=>{});
-              webview.executeJavaScript('history.length').then(l => { try { console.log('[WebView] guest history.length ->', l); } catch {} }).catch(()=>{});
-            } catch {}
-            return true;
-          }
-        } catch {}
+        try { webview.executeJavaScript && webview.executeJavaScript('history.back();').catch(()=>{}); } catch {}
         return false;
       };
       const tryForward = () => {
         if (canForward) {
           try { webview.goForward(); return true; } catch (err) { console.warn('goForward failed', err); }
         }
-        try {
-          if (webview.executeJavaScript) {
-            console.log('[WebView] tryForward: using executeJavaScript fallback -> history.forward()');
-            try {
-              webview.executeJavaScript('history.forward();').catch(()=>{});
-              webview.executeJavaScript('history.length').then(l => { try { console.log('[WebView] guest history.length ->', l); } catch {} }).catch(()=>{});
-            } catch {}
-            return true;
-          }
-        } catch {}
+        try { webview.executeJavaScript && webview.executeJavaScript('history.forward();').catch(()=>{}); } catch {}
         return false;
       };
 
+      // Attempt the requested direction first. If it's not available (e.g. the
+      // device emits tokens inverted for this hardware), fall back to the
+      // opposite direction when it's actually possible. This avoids doing
+      // nothing on devices that send the opposite token while still not
+      // undoing successful guest navigation (we only fallback when the
+      // primary action couldn't be performed).
       if (dir === 'right') {
-        if (!tryBack()) tryForward();
+        const ok = tryBack();
+        if (!ok) tryForward();
       } else if (dir === 'left') {
-        if (!tryForward()) tryBack();
+        const ok = tryForward();
+        if (!ok) tryBack();
       }
       return true;
     } catch (err) {
@@ -405,27 +500,25 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   };
     const handleWheel = (e) => {
       try {
-        // If a guest preload is present, it should emit IPC events directly.
-        // Skip renderer-level wheel synthesis in that case to avoid duplicates.
-        if (guestPreloadAvailable) return;
-        console.log('WebView element wheel event:', { dx: e.deltaX, dy: e.deltaY });
+  console.log('WebView element wheel event:', { dx: e.deltaX, dy: e.deltaY });
         // Only consider horizontal gestures
         const absX = Math.abs(e.deltaX);
         const absY = Math.abs(e.deltaY);
         if (absX <= absY) return;
-        const now = nowMs();
+        const now = performance.now ? performance.now() : Date.now();
         if (now < wheelCooldownUntil) return;
         wheelAccum += e.deltaX;
         if (wheelAccum >= wheelThreshold) {
           wheelAccum = 0;
           wheelCooldownUntil = now + wheelCooldownMs;
-          // swipe right -> back
-          processSwipe('right');
+          // Synthesize an incoming token (guest would post 'right' for positive dx).
+          const incoming = 'right';
+          processSwipe(incoming);
         } else if (wheelAccum <= -wheelThreshold) {
           wheelAccum = 0;
           wheelCooldownUntil = now + wheelCooldownMs;
-          // swipe left -> forward
-          processSwipe('left');
+          const incoming = 'left';
+          processSwipe(incoming);
         }
       } catch {}
     };
@@ -439,28 +532,46 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     });
 
     // Listen for ipc messages sent from guest preload via ipcRenderer.sendToHost
-  const handleIpcMessage = (e) => {
+    const handleIpcMessage = (e) => {
       try {
         try { console.log('WebView ipc-message received:', e && e.channel, e && e.args); } catch {}
         if (e?.channel === 'nebula-swipe') {
-          const dir = (e?.args && e.args[0]) || '';
-          // Normalize: guest preload wheel delta sign can be inverted on some platforms/devices.
-          // Flip the direction here so the renderer's mapping (right -> back, left -> forward)
-          // matches the user's physical swipe expectation.
-          const mappedDir = dir === 'left' ? 'right' : dir === 'right' ? 'left' : dir;
+          const incoming = (e?.args && e.args[0]) || '';
+          // Dedupe near-duplicate incoming messages (ipc vs postMessage)
+          const now = nowMs();
+          if (incoming === lastIncomingToken && (now - lastIncomingAt) < DUP_SUPPRESSION_MS) {
+            try { console.log('Duplicate incoming token suppressed:', incoming); } catch {}
+            return;
+          }
+          lastIncomingAt = now; lastIncomingToken = incoming;
+          // Normalize incoming token against current history state to handle
+          // devices that report inverted delta signs. If the incoming token
+          // doesn't map to an available action, prefer the action that is
+          // possible (canGoBack/canGoForward).
+          const canBackNow = !!(webview && webview.canGoBack && webview.canGoBack());
+          const canForwardNow = !!(webview && webview.canGoForward && webview.canGoForward());
+          let dir = incoming;
+          if (incoming === 'left') {
+            // guest said 'left' — on some hardware this actually means back
+            if (canBackNow && !canForwardNow) dir = 'right';
+            else if (!canBackNow && canForwardNow) dir = 'left';
+          } else if (incoming === 'right') {
+            if (canForwardNow && !canBackNow) dir = 'left';
+            else if (!canForwardNow && canBackNow) dir = 'right';
+          }
           try {
-            // mark that guest emitted a gesture
-            try { guestGestureSeenRef.current = true; lastGuestGestureAtRef.current = nowMs(); window.__nebulaLastGuestGesture = Date.now(); } catch {}
             // If the webview is currently loading, queue the swipe to avoid navigation errors
-            if (isLoadingRef.current) {
-              queuedSwipeRef.current = mappedDir;
-              queuedSwipeTsRef.current = Date.now();
-              try { setSwipeIndicator({ dir: mappedDir, visible: true, ignored: false }); } catch {}
-              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              if (isLoadingRef.current) {
+              queuedSwipeRef.current = dir;
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              // reset single hide timer
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
             } else {
-              try { setSwipeIndicator({ dir: mappedDir, visible: true, ignored: false }); } catch {}
-              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
-              processSwipe(mappedDir);
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              processSwipe(dir);
             }
           } catch (err) { console.warn('ipc-message handler error', err); }
         }
@@ -471,23 +582,56 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     // Receive synthesized swipe messages from the guest page's preload via postMessage
     const handleMessage = (event) => {
       try {
-        // Only handle postMessage-based swipes in fallback mode (no guest preload)
-        if (guestPreloadAvailable) return;
         try { console.log('WebView host message event:', event && event.data); } catch {}
         const data = event?.data || {};
-        if (data && (data.__nebulaSwipe === 'right' || data.__nebulaSwipe === 'left')) {
-          // Normalize/postMessage fallback may have opposite sign; flip to match renderer mapping
-          const incoming = data.__nebulaSwipe === 'right' ? 'right' : 'left';
-          const dir = incoming === 'left' ? 'right' : incoming === 'right' ? 'left' : incoming;
+        if (data && data.__nebulaSwipe === 'right') {
+          const incoming = 'right';
+          const now = nowMs();
+          if (incoming === lastIncomingToken && (now - lastIncomingAt) < DUP_SUPPRESSION_MS) {
+            try { console.log('Duplicate incoming token suppressed (postMessage):', incoming); } catch {}
+            return;
+          }
+          lastIncomingAt = now; lastIncomingToken = incoming;
+          // Normalize postMessage tokens similarly to the ipc path
+          const canBackNow = !!(webview && webview.canGoBack && webview.canGoBack());
+          const canForwardNow = !!(webview && webview.canGoForward && webview.canGoForward());
+          let dir = 'right';
+          if (canForwardNow && !canBackNow) dir = 'left';
+          else if (!canForwardNow && canBackNow) dir = 'right';
           try {
             if (isLoadingRef.current) {
               queuedSwipeRef.current = dir;
-              queuedSwipeTsRef.current = Date.now();
               try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
-              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
             } else {
               try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
-              setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+              processSwipe(dir);
+            }
+          } catch (err) { console.warn(err); }
+        } else if (data && data.__nebulaSwipe === 'left') {
+          const incoming = 'left';
+          const now = nowMs();
+          if (incoming === lastIncomingToken && (now - lastIncomingAt) < DUP_SUPPRESSION_MS) {
+            try { console.log('Duplicate incoming token suppressed (postMessage):', incoming); } catch {}
+            return;
+          }
+          lastIncomingAt = now; lastIncomingToken = incoming;
+          let dir = 'left';
+          if (canBackNow && !canForwardNow) dir = 'right';
+          else if (!canBackNow && canForwardNow) dir = 'left';
+          try {
+            if (isLoadingRef.current) {
+              queuedSwipeRef.current = dir;
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
+            } else {
+              try { setSwipeIndicator({ dir, visible: true, ignored: false }); } catch {}
+              try { if (indicatorHideHandle) clearTimeout(indicatorHideHandle); } catch {}
+              indicatorHideHandle = setTimeout(() => { try { setSwipeIndicator(s => ({ ...s, visible: false })); } catch {} }, 700);
               processSwipe(dir);
             }
           } catch (err) { console.warn(err); }
@@ -569,8 +713,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
               <div style={{ fontWeight:600, fontSize:14, textAlign:'center' }}>Add Tile</div>
             </button>
             {(settings?.homeTiles || []).map((tile, i) => (
-              <div key={i} style={{ position: 'relative' }}>
-              <button onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} onContextMenu={(e)=>{ e.preventDefault(); setTileContextMenu({ visible:true, x: e.clientX, y: e.clientY, index: i }); }} style={{
+              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
                 display:'flex', flexDirection:'column', alignItems:'center', gap:8,
                 background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
               }}>
@@ -581,7 +724,6 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                 )}
                 <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
               </button>
-              </div>
             ))}
           </div>
 
@@ -618,18 +760,6 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
               </div>
             </div>
           )}
-          {/* Tile context menu (Edit / Remove) */}
-          {tileContextMenu.visible && tileContextMenu.index >= 0 && (function(){
-            const t = (settings?.homeTiles || [])[tileContextMenu.index];
-            return (
-              <div style={{ position:'fixed', left: tileContextMenu.x, top: tileContextMenu.y, background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius:8, padding:6, zIndex:9999 }} onMouseLeave={()=>setTileContextMenu({ visible:false, x:0, y:0, index:-1 })}>
-                <div style={{ display:'flex', flexDirection:'column', minWidth:140 }}>
-                  <button onClick={()=>{ try{ setTileForm({ title: t?.title || '', url: t?.url || '' }); setShowAddTile(true); } finally { setTileContextMenu({ visible:false, x:0, y:0, index:-1 }); } }} style={{ padding:'8px 10px', background:'transparent', border:'none', color:'var(--fg)', textAlign:'left', cursor:'pointer' }}>Edit</button>
-                  <button onClick={async ()=>{ try{ const cur = (settings?.homeTiles || []).slice(); cur.splice(tileContextMenu.index, 1); await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: cur }); } catch{} finally{ setTileContextMenu({ visible:false, x:0, y:0, index:-1 }); } }} style={{ padding:'8px 10px', background:'transparent', border:'none', color:'var(--fg)', textAlign:'left', cursor:'pointer' }}>Remove</button>
-                </div>
-              </div>
-            );
-          })()}
         </div>
       ) : (
         <webview
@@ -661,8 +791,10 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       />
       {/* Swipe indicator overlay */}
       {swipeIndicator && swipeIndicator.visible && (
-        <div className={`swipe-indicator ${swipeIndicator.dir === 'left' ? 'left' : 'right'} visible`} aria-hidden>
-          <div className={`arrow ${swipeIndicator.ignored ? 'ghost' : ''}`}>{swipeIndicator.dir === 'left' ? '←' : '→'}</div>
+        // Map token directly: 'right' token => navigate back (show left/back arrow),
+        // 'left' token => navigate forward (show right/forward arrow).
+        <div className={`swipe-indicator ${swipeIndicator.dir === 'right' ? 'left' : 'right'} visible`} aria-hidden>
+          <div className={`arrow ${swipeIndicator.ignored ? 'ghost' : ''}`}>{swipeIndicator.dir === 'right' ? '←' : '→'}</div>
         </div>
       )}
     </div>

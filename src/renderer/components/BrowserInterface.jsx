@@ -153,6 +153,7 @@ const BrowserInterface = ({
   const [stopLoadingFn, setStopLoadingFn] = useState(null);
   const [zoomFns, setZoomFns] = useState({ zoomIn: null, zoomOut: null, resetZoom: null });
   const [audioFns, setAudioFns] = useState({ toggleMute: null });
+  const [thumbnails, setThumbnails] = useState({}); // tabId -> dataURL
   const [closedTabs, setClosedTabs] = useState([]);
   const dragIndexRef = useRef(null);
   const draggingTabIdRef = useRef(null);
@@ -595,6 +596,14 @@ const BrowserInterface = ({
             key={tab.id}
             className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''} ${draggedTabId === tab.id ? 'dragging' : ''}`}
             onClick={() => handleSwitchTab(tab.id)}
+            onMouseEnter={async () => {
+              try {
+                if (navFnsRef.current?.captureThumbnail) {
+                  const data = await navFnsRef.current.captureThumbnail();
+                  if (data) setThumbnails(t => ({ ...t, [tab.id]: data }));
+                }
+              } catch {}
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id });
@@ -615,6 +624,11 @@ const BrowserInterface = ({
             {tab.pinned && <span style={{ marginRight: 6 }}>📌</span>}
             {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, marginRight: 8, borderRadius: 3 }} />}
             <span className="tab-title">{tab.title}</span>
+            {thumbnails[tab.id] && (
+              <div className="tab-thumb" style={{ position: 'absolute', top: '44px', left: 8, width: 260, height: 150, borderRadius: 8, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.25)', zIndex: 1200, display: 'none' }}>
+                <img src={thumbnails[tab.id]} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </div>
+            )}
             {!tab.pinned && (
               <button
                 className="tab-close"
@@ -659,6 +673,9 @@ const BrowserInterface = ({
     onOpenFind={() => openFindFunction && openFindFunction()}
   onOpenSettings={() => { try { window.electronAPI?.openSettingsWindow?.(); } catch {} }}
   progress={pageProgress}
+  onToggleReader={() => {
+    try { navFnsRef.current?.toggleReader && navFnsRef.current.toggleReader(); } catch {}
+  }}
   />)}
 
       {pageLoading && (
