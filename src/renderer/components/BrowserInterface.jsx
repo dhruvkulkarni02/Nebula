@@ -155,8 +155,11 @@ const BrowserInterface = ({
   const [audioFns, setAudioFns] = useState({ toggleMute: null });
   const [closedTabs, setClosedTabs] = useState([]);
   const dragIndexRef = useRef(null);
+  const draggingTabIdRef = useRef(null);
   const importInputRef = useRef(null);
+  const [draggedTabId, setDraggedTabId] = useState(null);
   const [tabMenu, setTabMenu] = useState({ open: false, x: 0, y: 0, tabId: null });
+  const [isDraggingTab, setIsDraggingTab] = useState(false);
   const bookmarksDragIndexRef = useRef(null);
   const navFnsRef = useRef({ goBack: null, goForward: null, reload: null });
   const [navState, setNavState] = useState({ canGoBack: false, canGoForward: false });
@@ -203,6 +206,16 @@ const BrowserInterface = ({
     const handler = (_e, data) => {
       try {
         const dir = (data?.direction || '').toLowerCase();
+        // If the guest preload already emitted a gesture recently, prefer it
+        // and ignore main-sent gestures to avoid duplicates.
+        const GUEST_SUPPRESS_MS = 2000;
+        try {
+          const last = window.__nebulaLastGuestGesture || 0;
+          if (last && (Date.now() - last) < GUEST_SUPPRESS_MS) {
+            // ignore main forwarded gesture
+            return;
+          }
+        } catch {}
         if (dir === 'right') {
           // macOS: swipe right -> back
           navFnsRef.current?.goBack?.();
@@ -312,8 +325,12 @@ const BrowserInterface = ({
   }, [tabs]);
 
   const handleTabDragStart = (index) => (e) => {
-    dragIndexRef.current = index;
-    e.dataTransfer.effectAllowed = 'move';
+  const tab = displayTabs[index];
+  dragIndexRef.current = index;
+  draggingTabIdRef.current = tab?.id || null;
+  setIsDraggingTab(true);
+  setDraggedTabId(tab?.id || null);
+  e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleTabDragOver = (index) => (e) => {
@@ -326,6 +343,9 @@ const BrowserInterface = ({
     const from = dragIndexRef.current;
     const to = index;
     dragIndexRef.current = null;
+  draggingTabIdRef.current = null;
+  setIsDraggingTab(false);
+  setDraggedTabId(null);
     if (from == null || from === to) return;
     // Reorder within pinned or within normal segment only
     const fromTab = displayTabs[from];
@@ -355,6 +375,13 @@ const BrowserInterface = ({
       });
       return arr;
     });
+  };
+
+  // Reset dragging state on dragend (when user stops dragging without dropping)
+  const handleTabDragEnd = (e) => {
+    dragIndexRef.current = null;
+    draggingTabIdRef.current = null;
+    setIsDraggingTab(false);
   };
 
   const handleTabUrlChange = (tabId, newUrl, title = '') => {
@@ -509,6 +536,56 @@ const BrowserInterface = ({
 
   return (
     <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
+  {/* Left-edge drop zone: appear while dragging a tab to allow enabling vertical tabs */}
+  {isDraggingTab && (
+    <div
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+      onDrop={async (e) => {
+        e.preventDefault();
+            try {
+              const next = { ...(settings || {}), tabsLayout: 'vertical-left' };
+              await window.electronAPI?.updateSettings?.(next);
+              setSettings(next);
+
+              // Move the dragged tab into the visible vertical list and activate it
+              const draggedId = draggingTabIdRef.current;
+              if (draggedId != null) {
+                setTabs(prev => {
+                  const idx = prev.findIndex(t => t.id === draggedId);
+                  if (idx === -1) return prev;
+                  const tab = prev[idx];
+                  const nextArr = [...prev.filter((t) => t.id !== draggedId)];
+                  // Insert the tab at the front of the normal (non-pinned) segment
+                  const insertAt = nextArr.findIndex(t => !t.pinned);
+                  if (insertAt === -1) {
+                    nextArr.unshift({ ...tab, active: true });
+                  } else {
+                    nextArr.splice(insertAt, 0, { ...tab, active: true });
+                  }
+                  // Ensure only the moved tab is active
+                  return nextArr.map(t => ({ ...t, active: t.id === draggedId }));
+                });
+                setActiveTabId(draggedId);
+                // Navigate to the tab's URL so the content area reflects it
+                try {
+                  const t = tabs.find(x => x.id === draggedId) || null;
+                  if (t && t.url) {
+                    if (window.electronAPI) await window.electronAPI.navigateToUrl(t.url);
+                    onNavigate(t.url);
+                  }
+                } catch (err) {}
+              }
+            } catch (err) {
+              console.error('Failed to enable vertical tabs', err);
+            } finally {
+              dragIndexRef.current = null;
+              draggingTabIdRef.current = null;
+              setIsDraggingTab(false);
+            }
+      }}
+      style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: 44, zIndex: 1500, background: 'linear-gradient(90deg, rgba(59,130,246,0.06), transparent)', pointerEvents: 'auto' }}
+    />
+  )}
   {/* Tab Bar (hidden when vertical tabs are enabled) */}
   {(settings?.tabsLayout || 'top') !== 'vertical-left' && (
   <div className="tab-bar" onDoubleClick={handleNewTab}>
@@ -530,6 +607,7 @@ const BrowserInterface = ({
             }}
             draggable
             onDragStart={handleTabDragStart(idx)}
+            onDragEnd={handleTabDragEnd}
             onDragOver={handleTabDragOver(idx)}
             onDrop={handleTabDrop(idx)}
           >
@@ -673,6 +751,7 @@ const BrowserInterface = ({
                   onContextMenu={(e) => { e.preventDefault(); setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id }); }}
                   draggable
                   onDragStart={handleTabDragStart(idx)}
+                  onDragEnd={handleTabDragEnd}
                   onDragOver={handleTabDragOver(idx)}
                   onDrop={handleTabDrop(idx)}
                   style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid var(--border)' : '1px solid transparent', background: tab.active ? 'color-mix(in srgb, var(--panel) 94%, var(--bg))' : 'transparent' }}
@@ -781,6 +860,14 @@ const BrowserInterface = ({
             return t?.pinned ? 'Unpin tab' : 'Pin tab';
           })()} onClick={() => { handlePinToggle(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
           <MenuItem label="Duplicate tab" onClick={() => { handleDuplicateTab(tabMenu.tabId); setTabMenu({ open: false, x: 0, y: 0, tabId: null }); }} />
+          <MenuItem label={(settings?.tabsLayout || 'top') === 'vertical-left' ? 'Disable vertical tabs' : 'Enable vertical tabs'} onClick={async () => {
+            try {
+              const next = { ...(settings || {}), tabsLayout: (settings?.tabsLayout || 'top') === 'vertical-left' ? 'top' : 'vertical-left' };
+              await window.electronAPI?.updateSettings?.(next);
+              setSettings(next);
+            } catch (err) {}
+            setTabMenu({ open: false, x: 0, y: 0, tabId: null });
+          }} />
           <MenuItem label="Mute tab" onClick={() => {
             handleSwitchTab(tabMenu.tabId);
             setTimeout(() => { audioFns.toggleMute && audioFns.toggleMute(); }, 0);

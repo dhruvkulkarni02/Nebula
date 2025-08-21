@@ -149,6 +149,13 @@
   background: rgba(250, 204, 21, 0.2); /* amber-300 at ~20% */
 }
 
+/* Dragging tab visual */
+.tab.dragging {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  opacity: 0.98;
+}
+
 .reload-button {
   background: transparent;
   border: none;
@@ -255,3 +262,24 @@
   from { transform: translateY(-4px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* New-tab and engine badge styles */
+.new-tab-button {
+  border: none;
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 16px;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.new-tab-button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transform: translateY(-1px);
+}
+.engine-badge { background: transparent; border: none; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14px }
+.engine-badge:hover { background: #f8fafc }

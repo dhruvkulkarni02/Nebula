@@ -72,15 +72,29 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
           <div className="settings-body">
             <div className="setting-item">
               <label className="setting-label">Default search engine</label>
-              <select
-                className="setting-input"
-                value={defaultSearchEngine}
-                onChange={(e) => setDefaultSearchEngine(e.target.value)}
-              >
-                <option value="google">Google</option>
-                <option value="duckduckgo">DuckDuckGo</option>
-                <option value="brave">Brave</option>
-              </select>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <label className={`engine-option ${defaultSearchEngine === 'google' ? 'active' : ''}`} onClick={() => setDefaultSearchEngine('google')}>
+                  <div className="engine-icon">G</div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Google</div>
+                    <div className="hint">Fast, relevant results</div>
+                  </div>
+                </label>
+                <label className={`engine-option ${defaultSearchEngine === 'duckduckgo' ? 'active' : ''}`} onClick={() => setDefaultSearchEngine('duckduckgo')}>
+                  <div className="engine-icon">🦆</div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>DuckDuckGo</div>
+                    <div className="hint">Privacy-first suggestions</div>
+                  </div>
+                </label>
+                <label className={`engine-option ${defaultSearchEngine === 'brave' ? 'active' : ''}`} onClick={() => setDefaultSearchEngine('brave')}>
+                  <div className="engine-icon">🦁</div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Brave</div>
+                    <div className="hint">Private &amp; independent</div>
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="setting-item">

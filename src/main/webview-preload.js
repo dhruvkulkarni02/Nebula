@@ -6,8 +6,8 @@
   try { ({ ipcRenderer } = require('electron')); } catch {}
 
   const state = { accum: 0, cooldownUntil: 0 };
-  const THRESHOLD = 120; // more sensitive; tuned for macOS trackpads
-  const COOLDOWN = 400; // ms
+  const THRESHOLD = 140; // slightly less sensitive to avoid accidental triggers
+  const COOLDOWN = 600; // ms - longer cooldown to avoid duplicates/races
 
   function onWheel(e) {
     try {
@@ -21,22 +21,16 @@
       state.accum += dx;
       if (state.accum >= THRESHOLD) {
         state.accum = 0; state.cooldownUntil = now + COOLDOWN;
-        // right -> back
-    try { console.log('[webview-preload] detected swipe right -> history.back()'); } catch {}
-    try { if (window.history && typeof window.history.back === 'function') window.history.back(); } catch (e) { try { console.warn('[webview-preload] history.back failed', e); } catch {} }
-    try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'right'); } catch {}
-    try { window.parent.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
-    try { window.top.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
-    try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
+        // right -> signal host (do NOT call history.back from guest to avoid racing with embedder)
+        try { console.log('[webview-preload] detected swipe right -> notify host'); } catch {}
+        try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'right'); } catch {}
+        try { window.postMessage && window.postMessage({ __nebulaSwipe: 'right' }, '*'); } catch {}
       } else if (state.accum <= -THRESHOLD) {
         state.accum = 0; state.cooldownUntil = now + COOLDOWN;
-        // left -> forward
-    try { console.log('[webview-preload] detected swipe left -> history.forward()'); } catch {}
-    try { if (window.history && typeof window.history.forward === 'function') window.history.forward(); } catch (e) { try { console.warn('[webview-preload] history.forward failed', e); } catch {} }
-    try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'left'); } catch {}
-    try { window.parent.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
-    try { window.top.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
-    try { if (window.postMessage) window.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
+        // left -> signal host (do NOT call history.forward from guest)
+        try { console.log('[webview-preload] detected swipe left -> notify host'); } catch {}
+        try { ipcRenderer && ipcRenderer.sendToHost('nebula-swipe', 'left'); } catch {}
+        try { window.postMessage && window.postMessage({ __nebulaSwipe: 'left' }, '*'); } catch {}
       }
     } catch {}
   }
