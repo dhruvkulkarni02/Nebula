@@ -1,0 +1,26 @@
+# Simplified local ad/tracker patterns (subset of EasyList)
+||doubleclick.net^
+||googlesyndication.com^
+||googleadservices.com^
+||pagead2.googlesyndication.com^
+||adservice.google.com^
+||ads.youtube.com^
+||pubmatic.com^
+||taboola.com^
+||outbrain.com^
+||criteo.com^
+||adsafeprotected.com^
+||yandex.ru/ads^
+||bing.com/AS/Suggestions^
+# path-based
+/adserver
+/ads?
+/ads/
+/ad_tag
+#ad filenames
+ad.js
+ads.js
+adframe
+adframe_
+*ad_unit*
+*adformat*

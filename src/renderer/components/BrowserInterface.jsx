@@ -5,6 +5,7 @@ import BookmarksPanel from './BookmarksPanel';
 import HistoryPanel from './HistoryPanel';
 import DownloadsManager from './DownloadsManager';
 import SettingsPanel from './SettingsPanel';
+import OnboardingModal from './OnboardingModal';
 import '../styles/BrowserInterface.css';
 
 const BrowserInterface = ({
@@ -538,6 +539,15 @@ const BrowserInterface = ({
 
   return (
     <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
+      {/* Onboarding: show once when settings.onboardingSeen is not true */}
+      { !settings?.onboardingSeen && (
+        <OnboardingModal
+          initialAdblockEnabled={settings?.adBlockEnabled}
+          onClose={() => {
+            try { setSettings(prev => ({ ...(prev || {}), onboardingSeen: true })); } catch {}
+          }}
+        />
+      )}
   {/* Left-edge drop zone: appear while dragging a tab to allow enabling vertical tabs */}
   {isDraggingTab && (
     <div

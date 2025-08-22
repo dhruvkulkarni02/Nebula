@@ -1,6 +1,17 @@
 const { app, BrowserWindow, BrowserView, session, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+// Adblock engine imports
+let fetchImpl = null;
+try { fetchImpl = require('cross-fetch'); } catch (e) { fetchImpl = global.fetch; }
+let ElectronBlocker = null;
+try {
+  ElectronBlocker = require('@cliqz/adblocker-electron').ElectronBlocker;
+} catch (e) {
+  ElectronBlocker = null;
+}
+
+let blockerInstance = null;
 
 // Synchronous IPC for renderer/preload to fetch the absolute webview preload path
 try {
@@ -22,6 +33,195 @@ let currentBrowserView;
 let adBlockEnabled = true;
 let adBlockStats = { blocked: 0, allowed: 0 };
 let adBlockAllowlist = new Set(); // hostnames for which blocking is disabled
+let filterEngine = null;
+// Circular buffer of recent blocked requests for diagnostics (dev-only)
+const LAST_BLOCKED_MAX = 200;
+const lastBlocked = [];
+function pushBlockedEntry(entry) {
+  try {
+    const e = Object.assign({ ts: Date.now() }, entry || {});
+    lastBlocked.push(e);
+    if (lastBlocked.length > LAST_BLOCKED_MAX) lastBlocked.shift();
+  } catch (e) {}
+}
+
+// Expose IPC for diagnostics: get and clear last-blocked entries
+try {
+  ipcMain.handle('get-last-blocked', async () => {
+    return { entries: lastBlocked.slice().reverse() };
+  });
+  ipcMain.handle('clear-last-blocked', async () => {
+    lastBlocked.length = 0; return { success: true };
+  });
+} catch (e) {}
+
+// Fetch helper using native https (with timeout)
+function fetchText(url, timeout = 8000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const https = require('https');
+      const req = https.get(url, { timeout }, (res) => {
+        if (res.statusCode && res.statusCode >= 400) return resolve(null);
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { try { req.destroy(); } catch {} ; resolve(null); });
+    } catch (e) { resolve(null); }
+  });
+}
+
+async function initFullFilters() {
+  try {
+    // Prefer a maintained ElectronBlocker when available for full EasyList semantics
+      try {
+        if (!blockerInstance && ElectronBlocker) {
+          const crossFetch = require('cross-fetch');
+          // First attempt: try to initialize from prebuilt bundle (fast path)
+          try {
+            if (typeof ElectronBlocker.fromPrebuiltFull === 'function') {
+              const blocker = await ElectronBlocker.fromPrebuiltFull(crossFetch);
+              blockerInstance = blocker;
+              // By default, do NOT enable the engine's cosmetic/mutation-based injections here because
+              // they can modify <script> elements or use MutationObservers that trigger Trusted Types/CSP errors
+              // in complex sites (e.g., YouTube). Keep network filters active and manage cosmetics conservatively.
+              try {
+                if (blockerInstance.config) {
+                  blockerInstance.config.loadCosmeticFilters = false;
+                  blockerInstance.config.enableMutationObserver = false;
+                }
+              } catch (e) {}
+              try { blockerInstance.enableBlockingInSession(session.defaultSession); console.log('[Adblock] ElectronBlocker initialized (prebuilt) and attached to default session (cosmetics disabled)'); } catch (e) { console.warn('Failed to attach ElectronBlocker to session:', e?.message || e); }
+              return { engine: 'electron-blocker', instance: blockerInstance };
+            }
+          } catch (err) {
+            console.warn('ElectronBlocker.fromPrebuiltFull failed (or not available), will try fromLists:', err?.message || err);
+          }
+
+          // Second attempt: explicitly load known lists and initialize from them
+          try {
+            const adblock = require('@cliqz/adblocker');
+            // Prefer the most-complete list set available in the package
+            const lists = Array.isArray(adblock.fullLists) ? adblock.fullLists : (Array.isArray(adblock.adsAndTrackingLists) ? adblock.adsAndTrackingLists : (Array.isArray(adblock.adsLists) ? adblock.adsLists : []));
+            if (!Array.isArray(lists) || lists.length === 0) {
+              throw new Error('No adblock lists available from @cliqz/adblocker');
+            }
+            // Defensive: ensure fetch is a function
+            const fetchFn = (typeof crossFetch === 'function') ? crossFetch : (crossFetch && typeof crossFetch.default === 'function' ? crossFetch.default : null);
+            if (!fetchFn) throw new Error('cross-fetch is not available as a function');
+            // Use the library factory which expects (fetch, urls, config)
+            const blocker = await ElectronBlocker.fromLists(fetchFn, lists, { enableCompression: true });
+            blockerInstance = blocker;
+            try {
+              if (blockerInstance.config) {
+                blockerInstance.config.loadCosmeticFilters = false;
+                blockerInstance.config.enableMutationObserver = false;
+              }
+            } catch (e) {}
+            try { blockerInstance.enableBlockingInSession(session.defaultSession); console.log('[Adblock] ElectronBlocker initialized via fromLists and attached (cosmetics disabled)'); } catch (e) { console.warn('Failed to attach ElectronBlocker to session:', e?.message || e); }
+            return { engine: 'electron-blocker', instance: blockerInstance };
+          } catch (e) {
+            console.warn('ElectronBlocker fallback fromLists failed:', e?.message || e);
+            // allow falling through to local parser fallback below
+          }
+        }
+      } catch (e) {
+        console.warn('ElectronBlocker init failed, falling back to local parser:', e?.message || e);
+      }
+    const cacheDir = path.join(app.getPath('userData'), 'adlists');
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+
+    // Primary sources (EasyList + EasyPrivacy)
+    const sources = [
+      { url: 'https://easylist.to/easylist/easylist.txt', file: path.join(cacheDir, 'easylist.txt') },
+      { url: 'https://easylist.to/easylist/easyprivacy.txt', file: path.join(cacheDir, 'easyprivacy.txt') }
+    ];
+
+    const collected = [];
+    for (const s of sources) {
+      let txt = await fetchText(s.url, 10000);
+      if (!txt && fs.existsSync(s.file)) {
+        try { txt = fs.readFileSync(s.file, 'utf8'); } catch {}
+      }
+      if (txt) {
+        try { fs.writeFileSync(s.file, txt, 'utf8'); } catch {}
+        collected.push(txt);
+      }
+    }
+
+    // Also include local default fallback rules shipped with the app
+    try {
+      const localPath = path.join(__dirname, 'adlists', 'default.txt');
+      if (fs.existsSync(localPath)) collected.push(fs.readFileSync(localPath, 'utf8'));
+    } catch {}
+
+    const allText = collected.join('\n');
+    const lines = allText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    const hostSuffixes = new Set();
+    const substrings = new Set();
+    const regexes = [];
+    const exceptions = []; // rules starting with @@
+
+    for (let ln of lines) {
+      if (!ln || ln.startsWith('!') || ln.startsWith('#')) continue; // comments
+      if (ln.startsWith('@@')) { exceptions.push(ln.slice(2)); continue; }
+      // cosmetic rules (contain ## or #@#) skip
+      if (ln.includes('##') || ln.includes('#@#')) continue;
+      // Simple domain anchor: ||example.com^ or ||example.com
+      if (ln.startsWith('||')) {
+        let v = ln.slice(2).replace(/\^.*$/, '');
+        v = v.replace(/^\./, '').toLowerCase();
+        if (v) hostSuffixes.add(v);
+        continue;
+      }
+      // Leading anchor: |http:// or |https:// or |https://www...
+      if (ln.startsWith('|')) {
+        // remove leading | and possible trailing ^
+        let v = ln.replace(/^\|+/, '').replace(/\^$/, '');
+        if (v) {
+          try { regexes.push(new RegExp('^' + v.replace(/\*/g, '.*').replace(/\./g, '\\.'), 'i')); } catch {};
+        }
+        continue;
+      }
+      // Wildcard or path-containing rule -> convert to regex
+      if (ln.indexOf('*') !== -1 || ln.indexOf('/') !== -1 || ln.indexOf('^') !== -1) {
+        try {
+          let reStr = ln.replace(/\^/g, '(?:$|\\W)').replace(/\./g, '\\.').replace(/\*/g, '.*');
+          // ensure we match anywhere
+          regexes.push(new RegExp(reStr, 'i'));
+        } catch (e) {}
+        continue;
+      }
+      // Otherwise, plain substring match
+      substrings.add(ln.toLowerCase());
+    }
+
+    // Also convert exceptions into a simple test list (prefixes)
+    const exceptionSubs = exceptions.map(e => e.trim()).filter(Boolean);
+
+    filterEngine = { hostSuffixes: Array.from(hostSuffixes), substrings: Array.from(substrings), regexes, exceptions: exceptionSubs };
+    console.log(`[Adblock] initialized filters: hosts=${filterEngine.hostSuffixes.length}, subs=${filterEngine.substrings.length}, regexes=${filterEngine.regexes.length}, exceptions=${filterEngine.exceptions.length}`);
+    return filterEngine;
+  } catch (e) {
+    console.warn('initFullFilters failed:', e?.message || e);
+    filterEngine = null;
+    return null;
+  }
+}
+
+// Helper that adapts cross-fetch to what ElectronBlocker expects
+function FetcherFromUrl(crossFetch) {
+  return async (url) => {
+    try {
+      const resp = await crossFetch(url);
+      if (!resp || !resp.ok) return null;
+      return await resp.text();
+    } catch (e) { return null; }
+  };
+}
 const AD_HOST_SUFFIXES = [
   'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google-analytics.com',
   'g.doubleclick.net', 'adservice.google.com', 'facebook.net', 'connect.facebook.net', 'fbcdn.net',
@@ -31,6 +231,8 @@ const AD_HOST_SUFFIXES = [
   'mixpanel.com', 'mathtag.com', 'yieldmo.com', 'pubmatic.com', 'rubiconproject.com', 'openx.net', 'rfihub.com',
   'moatads.com'
 ];
+// Hosts that should be treated as critical media sites where aggressive blocking may break functionality.
+const CRITICAL_HOSTS = ['youtube.com','www.youtube.com','ytimg.com','googlevideo.com','youtube-nocookie.com','youtu.be'];
 function hostnameFromUrl(u) { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } }
 function hostMatchesSuffix(host, suffix) {
   return host === suffix || host.endsWith('.' + suffix) || (suffix.endsWith('.*') && host.endsWith('.' + suffix.slice(0, -2)));
@@ -55,17 +257,14 @@ function shouldBlockUrl(u) {
 
     // Target common YouTube ad endpoints and typical ad-serving paths
     if (host.includes('youtube.com') || host.includes('youtube-nocookie.com') || host.includes('googlevideo.com') || host.includes('ytimg.com')) {
-      // Block explicit ad endpoints
-      if (path.startsWith('/get_midroll_info') || path.startsWith('/api/stats/ads') || path.startsWith('/get_video_info')) {
+      // Avoid blocking essential YouTube endpoints which break playback/navigation.
+      // Only treat clearly ad-marked paths as ads (keep metadata endpoints like /get_video_info accessible).
+      // Path-based heuristics (only strong ad markers)
+      if (path.includes('/ad/') || path.includes('ad_break') || path.includes('/adsrc') || path.includes('/pagead/')) {
         return true;
       }
 
-      // Path-based heuristics
-      if (path.includes('/ad/') || path.includes('ad_break') || path.includes('/ads') || path.includes('/adsrc') || path.includes('/pagead/')) {
-        return true;
-      }
-
-      // Query-parameter heuristics: look for ad-related params
+      // Query-parameter heuristics: look for ad-related params but be conservative
       const adParams = ['adformat', 'adurl', 'ad_unit', 'adunit', 'ad_tag', 'ad_k', 'ad_type', 'adbreak', 'ad_break', 'adsid', 'adsrc', 'ads'];
       for (const p of adParams) {
         if (query.includes(p + '=') || query.includes('&' + p + '=')) {
@@ -73,8 +272,8 @@ function shouldBlockUrl(u) {
         }
       }
 
-      // googlevideo sometimes hosts ad streams; if the path or query contains obvious 'ad' markers, block conservatively
-      if (host.endsWith('googlevideo.com') && (path.includes('ad') || query.includes('ad_tag') || query.includes('adformat'))) {
+      // googlevideo sometimes hosts ad streams; only block when the path/query contains explicit ad markers
+      if (host.endsWith('googlevideo.com') && (path.includes('/ad/') || path.includes('ad_tag') || path.includes('adformat'))) {
         return true;
       }
     }
@@ -92,6 +291,102 @@ function shouldBlockUrl(u) {
     // ignore parse errors and fall through
   }
 
+  return false;
+}
+
+// Additional compiled patterns to catch common ad/tracker URL shapes and path fragments.
+const AD_URL_PATTERNS = [
+  /(^|\/)ads?($|\/|[\?\#])/i,
+  /doubleclick/i,
+  /pagead/i,
+  /adserver/i,
+  /adservice/i,
+  /adthumb/i,
+  /adview/i,
+  /track(er|ing|ing_)/i,
+  /pixel(\.|\/)/i,
+  /banner(\.|\/)/i,
+  /interstitial/i,
+  /secureads/i,
+  /spotx/i,
+  /sovrn/i,
+  /rubicon/i,
+  /openx/i,
+  /adsystem/i,
+  /googlesyndication/i,
+  /adsafeprotected/i,
+  /taboola/i,
+  /outbrain/i,
+  /criteo/i,
+  /yandex.*ads?/i
+];
+
+// Whitelist common search suggestion endpoints so autocomplete/suggestions keep working
+const SUGGESTION_URL_PATTERNS = [
+  /complete\/search/i,            // google suggestion endpoints (complete/search)
+  /suggest/i,                     // generic 'suggest' endpoints
+  /ac\.duckduckgo\.com\/ac\//i, // duckduckgo autocomplete
+  /suggestqueries\.google\.com/i,
+  /clients1\.google\.com/i,
+  /www\.google(?:apis)?\.com\/complete/i,
+  /bing\.com\/AS\/Suggestions/i
+];
+
+// Filename-based heuristics
+function looksLikeAdFilename(pathname) {
+  try {
+    const filename = (pathname || '').split('/').pop() || '';
+    const lower = filename.toLowerCase();
+    const patterns = ['ad.', 'ad-', 'ads.', 'ads-', 'advert', 'adserver', 'doubleclick', 'googletag'];
+    for (const p of patterns) if (lower.indexOf(p) !== -1) return true;
+  } catch {}
+  return false;
+}
+
+// A higher-level gate used by the webRequest handler to decide cancellation
+function isLikelyAdRequest(details) {
+  try {
+    if (!details || !details.url) return false;
+    // If this looks like a search-suggestion/autocomplete request, never treat it as an ad
+    try {
+      for (const sre of SUGGESTION_URL_PATTERNS) {
+        if (sre.test(details.url)) return false;
+      }
+    } catch {}
+    // Respect allowlist early
+    const ref = details.referrer || (details.requestHeaders && (details.requestHeaders.Referer || details.requestHeaders.referer)) || '';
+    const refHost = hostnameFromUrl(ref);
+    if (refHost && adBlockAllowlist.has(refHost)) return false;
+
+    const u = new URL(details.url);
+    const host = (u.hostname || '').toLowerCase();
+    const path = (u.pathname || '').toLowerCase();
+    const query = (u.search || '').toLowerCase();
+
+    // Host suffixes caught earlier
+    for (const suf of AD_HOST_SUFFIXES) if (hostMatchesSuffix(host, suf)) return true;
+
+    // Patterns in host or path
+    for (const re of AD_URL_PATTERNS) {
+      try { if (re.test(host) || re.test(path) || re.test(query)) return true; } catch {}
+    }
+
+    // Filename heuristics
+    if (looksLikeAdFilename(path)) return true;
+
+    // Query parameter heuristics
+  // Remove overly broad params like 'client' and 'slot' which are used by suggestion APIs
+  const adParams = ['adformat', 'adurl', 'ad_unit', 'adunit', 'ad_tag', 'ad_k', 'ad_type', 'adbreak', 'adsid', 'adsrc', 'ads'];
+    for (const p of adParams) if (query.includes(p + '=')) return true;
+
+    // Heuristic: third-party requests that are scripts/xhr/fetch and include ad-like tokens
+    const suspectTypes = new Set(['script', 'xhr', 'fetch', 'subFrame', 'image']);
+    const type = (details.resourceType || '').toLowerCase();
+    const isThirdParty = refHost && host && refHost !== host;
+    if (isThirdParty && suspectTypes.has(type)) {
+      for (const re of AD_URL_PATTERNS) try { if (re.test(details.url)) return true; } catch {}
+    }
+  } catch (e) {}
   return false;
 }
 
@@ -535,7 +830,9 @@ function configureSessionSecurity() {
       const s = (typeof loadSettings === 'function') ? loadSettings() : {};
       adBlockEnabled = !!s.enableAdBlocker;
       adBlockAllowlist = new Set((s.adBlockAllowlist || []).map(h => String(h || '').toLowerCase()).filter(Boolean));
-    } catch {}
+    } catch (e) {
+      console.warn('Failed to load settings for ad blocker:', e?.message || e);
+    }
 
     // Load site permissions from settings
     let sitePermissions = {};
@@ -626,7 +923,8 @@ function configureSessionSecurity() {
     ses.setPermissionCheckHandler = ses.setPermissionCheckHandler || (() => true);
 
     // Configure webview behavior
-    const BLOCKED_TYPES = new Set(['script', 'image', 'xhr', 'fetch', 'subFrame', 'media', 'beacon', 'ping']);
+  // Broaden blocked resource types to cover fonts, stylesheets, objects and other resource shapes
+  const BLOCKED_TYPES = new Set(['script', 'image', 'xhr', 'fetch', 'subFrame', 'media', 'beacon', 'ping', 'stylesheet', 'font', 'object', 'other']);
     ses.webRequest.onBeforeRequest((details, callback) => {
       try {
         // HTTPS upgrade for top-level navigations (best-effort), but skip in dev for localhost
@@ -655,24 +953,106 @@ function configureSessionSecurity() {
           }
         } catch {}
 
-        if (adBlockEnabled && details.resourceType !== 'mainFrame' && BLOCKED_TYPES.has(details.resourceType)) {
-          // Skip blocking if current site is allowlisted
-          const ref = details.referrer || (details.requestHeaders && (details.requestHeaders.Referer || details.requestHeaders.referer)) || '';
-          const refHost = hostnameFromUrl(ref);
-          if (refHost && adBlockAllowlist.has(refHost)) {
-            adBlockStats.allowed++;
-            return callback({});
-          }
-          if (shouldBlockUrl(details.url)) {
-            adBlockStats.blocked++;
-            if (process.env.NODE_ENV === 'development') {
-              try { console.log('[AdBlock] cancelled:', details.url); } catch {}
-            }
-            return callback({ cancel: true });
-          }
+        // Only consider blocking for non-mainFrame resources and types we target
+        if (!adBlockEnabled || details.resourceType === 'mainFrame' || !BLOCKED_TYPES.has(details.resourceType)) {
+          adBlockStats.allowed++;
+          return callback({});
         }
+
+        // Respect allowlist early
+        const ref = details.referrer || (details.requestHeaders && (details.requestHeaders.Referer || details.requestHeaders.referer)) || '';
+        const refHost = hostnameFromUrl(ref);
+        if (refHost && adBlockAllowlist.has(refHost)) { adBlockStats.allowed++; return callback({}); }
+
+        // Never block suggestion/autocomplete endpoints
+        try {
+          for (const sre of SUGGESTION_URL_PATTERNS) {
+            if (sre.test(details.url)) { adBlockStats.allowed++; return callback({}); }
+          }
+        } catch {}
+
+        // Bypass ad blocking for critical video/asset hosts (conservative allowlist)
+        try {
+          const reqHost = hostnameFromUrl(details.url);
+          if (reqHost) {
+            for (const ch of CRITICAL_HOSTS) {
+              if (hostMatchesSuffix(reqHost, ch) || reqHost === ch) {
+                adBlockStats.allowed++;
+                console.log(`[AdBlock][bypass] host=${reqHost} reason=critical-site url=${details.url}`);
+                return callback({});
+              }
+            }
+          }
+        } catch (e) {}
+
+        // If the maintained blocker is available, consult it first (without letting it register its own network listeners)
+        try {
+          if (blockerInstance && typeof blockerInstance.match === 'function') {
+            try {
+              const adblock = require('@cliqz/adblocker');
+              const req = adblock.Request.fromRawDetails({
+                _originalRequestDetails: details,
+                requestId: `${details.id}`,
+                sourceUrl: details.referrer,
+                tabId: details.webContentsId,
+                type: (details.resourceType || 'other'),
+                url: details.url,
+              });
+              if (blockerInstance.config && blockerInstance.config.guessRequestTypeFromUrl) try { req.guessTypeOfRequest(); } catch {}
+              const { redirect, match } = blockerInstance.match(req);
+              if (redirect) {
+                adBlockStats.blocked++;
+                console.log(`[AdBlock][blocked] source=electron-blocker reason=redirect url=${details.url} type=${details.resourceType}`);
+                try { pushBlockedEntry({ source: 'electron-blocker', reason: 'redirect', url: details.url, type: details.resourceType, redirect: !!redirect.dataUrl, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+                return callback({ redirectURL: redirect.dataUrl });
+              }
+              if (match) {
+                adBlockStats.blocked++;
+                console.log(`[AdBlock][blocked] source=electron-blocker url=${details.url} type=${details.resourceType}`);
+                try { pushBlockedEntry({ source: 'electron-blocker', reason: 'match', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+                return callback({ cancel: true });
+              }
+            } catch (e) {
+              // If any adblock evaluation error occurs, fall through to local heuristics
+              console.warn('Adblock.match error:', e?.message || e);
+            }
+          }
+        } catch (e) {}
+
+        // Local parser fallback
+        try {
+          if (filterEngine) {
+            const urlLower = details.url.toLowerCase();
+            const u = (() => { try { return new URL(details.url); } catch { return null; } })();
+            const host = u && u.hostname ? u.hostname.toLowerCase() : '';
+
+            // Exceptions (simple contains match)
+            let excepted = false;
+            for (const ex of (filterEngine.exceptions || [])) try { if (urlLower.includes(ex.toLowerCase())) { excepted = true; break; } } catch {}
+            if (!excepted) {
+              for (const hs of (filterEngine.hostSuffixes || [])) {
+                if (!hs) continue; if (host === hs || host.endsWith('.' + hs)) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-host-suffix url=${details.url}`); try { pushBlockedEntry({ source: 'local-host-suffix', url: details.url, type: details.resourceType, reqHost: host, matchedHostSuffix: hs }); } catch (e) {} return callback({ cancel: true }); }
+              }
+              let matched = false;
+              for (const sub of (filterEngine.substrings || [])) { try { if (!sub) continue; if (urlLower.includes(sub)) { matched = true; break; } } catch {} }
+              if (!matched) { for (const re of (filterEngine.regexes || [])) try { if (re.test(details.url)) { matched = true; break; } } catch {} }
+              if (matched) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-parser url=${details.url}`); try { pushBlockedEntry({ source: 'local-parser', url: details.url, type: details.resourceType, reqHost: host }); } catch (e) {} return callback({ cancel: true }); }
+            }
+          }
+        } catch (e) {}
+
+        // Heuristic fallback
+        if (shouldBlockUrl(details.url) || isLikelyAdRequest(details)) {
+          adBlockStats.blocked++;
+          console.log(`[AdBlock][blocked] source=heuristic url=${details.url} type=${details.resourceType}`);
+          try { pushBlockedEntry({ source: 'heuristic', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+          return callback({ cancel: true });
+        }
+
         adBlockStats.allowed++;
-      } catch {}
+      } catch (e) {
+        console.warn('onBeforeRequest handler error:', e?.message || e);
+      }
       callback({});
     });
 
@@ -713,6 +1093,20 @@ function configureSessionSecurity() {
         callback({});
       }
     });
+
+    // Diagnostic: log network errors (including blocked-by-client/response) with context
+    try {
+      ses.webRequest.onErrorOccurred((details) => {
+        try {
+          if (!details || !details.url) return;
+          const err = String(details.error || '').toLowerCase();
+          // Common error indicators when a request was blocked by a handler
+          if (err.includes('blocked') || err.includes('err_blocked') || err.includes('cancelled') || err.includes('aborted')) {
+            console.log(`[AdBlock][net-error] err=${details.error} resourceType=${details.resourceType} webContentsId=${details.webContentsId || '(unknown)'} url=${details.url} referrer=${details.referrer || ''}`);
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
 
     // Hook download events to track progress and completion
     try {
@@ -1382,6 +1776,22 @@ function setupIpcHandlers() {
     return { ...adBlockStats };
   });
 
+  // Diagnostics: expose adblock internals for debugging (non-sensitive)
+  ipcMain.handle('get-adblock-diagnostics', async () => {
+    try {
+      return {
+        enabled: !!adBlockEnabled,
+        allowlistSize: adBlockAllowlist.size || 0,
+        stats: { ...adBlockStats },
+        engine: blockerInstance ? 'electron-blocker' : (filterEngine ? 'local-parser' : 'none'),
+        blockerAttachedToDefaultSession: (function(){ try { return !!(blockerInstance && session && session.defaultSession && blockerInstance && typeof blockerInstance.enableBlockingInSession === 'function'); } catch { return false; } })(),
+        filterSummary: filterEngine ? { hosts: (filterEngine.hostSuffixes||[]).length, substrings: (filterEngine.substrings||[]).length, regexes: (filterEngine.regexes||[]).length, exceptions: (filterEngine.exceptions||[]).length } : null
+      };
+    } catch (e) {
+      return { error: String(e) };
+    }
+  });
+
   ipcMain.handle('reset-adblock-stats', async () => {
     adBlockStats = { blocked: 0, allowed: 0 };
     return { ...adBlockStats };
@@ -1553,7 +1963,10 @@ function setupIpcHandlers() {
 setupIpcHandlers();
 
 // App event handlers
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  try { await initFullFilters(); } catch (e) { console.warn('initFullFilters failed:', e); }
+  try { await createWindow(); } catch (e) { console.warn('createWindow failed:', e); }
+});
 
 app.on('window-all-closed', () => {
   // Per user request: closing all tabs/windows should quit the app on all platforms
@@ -1593,8 +2006,9 @@ app.on('web-contents-created', (event, contents) => {
     // Allow webview to navigate freely - this is what we want for browsing
     contents.setWindowOpenHandler(({ url }) => {
       console.log('Webview trying to open window:', url);
-      // For now, block popups but allow navigation
-      return { action: 'deny' };
+  // For now, block popups but allow navigation; record blocked popups
+  try { pushBlockedEntry({ source: 'popup', url: String(url || ''), reqHost: hostnameFromUrl(String(url || '')), type: 'popup' }); } catch (e) {}
+  return { action: 'deny' };
     });
     
     // Don't block navigation for webview content
@@ -1732,4 +2146,16 @@ app.on('web-contents-created', (event, contents) => {
   } else {
     console.log('Unknown content type:', type, 'allowing navigation');
   }
+  // Ensure ElectronBlocker is attached to newly created webContents sessions so webviews/BrowserViews are covered
+  try {
+    if (blockerInstance && contents && typeof contents.session !== 'undefined' && contents.session) {
+      try {
+        blockerInstance.enableBlockingInSession(contents.session);
+        console.log('[Adblock] attached blocker to new webContents session:', contents.id || '(unknown)');
+      } catch (e) {
+        // Some blocker builds may not expose enableBlockingInSession for this session type; ignore
+        console.warn('[Adblock] failed to attach blocker to new session:', e?.message || e);
+      }
+    }
+  } catch (e) {}
 });

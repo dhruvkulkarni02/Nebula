@@ -384,15 +384,64 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     const injectAdCss = () => {
       try {
         const css = `
-          /* Common ad selectors (non-exhaustive) */
-          [id^=ad-], [id*=ad_], [id*=adslot], [class*=ad-], [class*=ads-], .ad, .ads, .adsbox, .adslot, .ad-banner, .ad-container, .advertisement, .ad-placeholder, .adblock-message, .ad_iframe, iframe[id^=google_ads_iframe] { display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; }
+          /* Strong ad selectors + overlay removals */
+          [id^=ad-], [id*=ad_], [id*=adslot], [class*=ad-], [class*=ads-], .ad, .ads, .adsbox, .adslot, .ad-banner, .ad-container, .advertisement, .ad-placeholder, .adblock-message, .ad_iframe, iframe[id^=google_ads_iframe], .banner-ad, .sponsored, .commercial, [data-ad], [data-ad-client], [data-ad-slot] { display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }
+          /* Hide common full-screen and sticky overlays used for ads */
+          .overlay, .modal, .ad-overlay, .popup, .subscribe-modal, .newsletter-modal, .cookie-consent, .cookie-consent-banner { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
           .adsbygoogle { display: none !important; }
+          /* Reduce z-index abuse */
+          iframe, .ad_iframe { z-index: 0 !important; }
         `;
-        const inj = `(function(){try{if(window.__nebula_ad_css_injected) return; const s=document.createElement('style'); s.id='__nebula_ad_css'; s.textContent=${JSON.stringify(css)}; document.head && document.head.appendChild(s); window.__nebula_ad_css_injected = true;}catch(e){}})();`;
+        const inj = `(function(){try{if(window.__nebula_ad_css_injected) return; const s=document.createElement('style'); s.id='__nebula_ad_css'; s.textContent=${JSON.stringify(css)}; (document.head||document.documentElement).appendChild(s); window.__nebula_ad_css_injected = true; }catch(e){} })();`;
         try { webviewRef.current && webviewRef.current.executeJavaScript(inj).catch(()=>{}); } catch {}
       } catch {}
     };
     try { injectAdCss(); } catch {}
+
+    // Inject a dynamic remover to watch for new ad nodes (helps against SPA-inserted ads)
+    const injectAdObserver = () => {
+      try {
+        const script = `(() => {
+          try {
+            if (window.__nebulaAdObserver) return;
+            const isAdNode = (n) => {
+              try {
+                if (!n || n.nodeType !== 1) return false;
+                const id = (n.id||'').toLowerCase();
+                const cls = (n.className||'').toString().toLowerCase();
+                const attr = Array.from(n.attributes||[]).map(a=>a.name+"="+(a.value||''));
+                if (/^ad-|ad_|adslot|ads-|ads_|doubleclick|googlesyndication|admanager|pagead|ad_iframe|adbanner/.test(id)) return true;
+                if (/\b(ad|ads|advert|sponsored|ad-banner|adslot|ad-container|ad_iframe|adsbygoogle)\b/.test(cls)) return true;
+                for (const a of attr) if (/data-ad|data-ad-client|data-ad-slot|data-track|aria-label=["']?ad/i.test(a)) return true;
+                return false;
+              } catch { return false; }
+            };
+            const removeIfAd = (node) => {
+              try {
+                if (!node) return;
+                if (isAdNode(node)) { node.remove(); return; }
+                // Also inspect descendants
+                const kids = node.querySelectorAll && node.querySelectorAll('[id],[class],[data-ad]');
+                if (kids && kids.length) {
+                  for (const k of kids) if (isAdNode(k)) try { k.remove(); } catch {}
+                }
+              } catch {}
+            };
+            const obs = new MutationObserver((mutations) => {
+              for (const m of mutations) {
+                for (const n of m.addedNodes || []) removeIfAd(n);
+              }
+            });
+            obs.observe(document.documentElement||document.body, { childList: true, subtree: true });
+            // Run once at start
+            try { removeIfAd(document.documentElement || document.body); } catch {}
+            window.__nebulaAdObserver = true;
+          } catch(e) {}
+        })();`;
+        try { webviewRef.current && webviewRef.current.executeJavaScript(script).catch(()=>{}); } catch {}
+      } catch {}
+    };
+    try { injectAdObserver(); } catch {}
 
     const handleFaviconUpdated = (event) => {
       if (onFaviconChangeRef.current) {

@@ -8,6 +8,9 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   user-select: none;
   gap: 12px;
+  /* Ensure the nav chrome and its popovers sit above the webview content */
+  position: relative;
+  z-index: 10000;
 }
 
 .nav-buttons {
@@ -57,6 +60,7 @@
   min-height: 40px;
   max-width: 880px;
   position: relative;
+  overflow: visible; /* allow suggestion dropdown to escape and not be clipped */
 }
 
 .address-bar:focus-within {
@@ -228,7 +232,7 @@
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
   padding: 6px;
-  z-index: 1000; /* ensure above other UI like tabs/bookmarks bar */
+  z-index: 20000 !important; /* force above webview/native content */
   max-height: 320px; /* prevent overflow off-screen */
   overflow-y: auto;
   animation: suggestIn 120ms ease-out;
