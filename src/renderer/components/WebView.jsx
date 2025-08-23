@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
+import { IconGitHub } from './icons';
+import IconNYTimes from './icons/IconNYTimes';
+import IconDuckDuckGo from './icons/IconDuckDuckGo';
+import IconYouTube from './icons/IconYouTube';
+import IconESPN from './icons/IconESPN';
+import IconSky from './icons/IconSky';
+import IconAdd from './icons/IconAdd';
 import '../styles/WebView.css';
+import { OnboardingProvider } from './onboarding/OnboardingProvider';
+import { OnboardingOverlay } from './onboarding/OnboardingOverlay';
+import { defaultOnboardingSteps } from './onboarding/steps';
 
 const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAvailable, onZoomAvailable, onFaviconChange, onAudioAvailable, onLoadingChange, onProgressChange, onOverlayToolsAvailable, onNavAvailable, onNavStateChange, settings }) => {
   const webviewRef = useRef(null);
@@ -712,7 +722,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       webview.removeEventListener('did-navigate', handleNavigation);
       webview.removeEventListener('did-navigate-in-page', handleNavigation);
       webview.removeEventListener('page-favicon-updated', handleFaviconUpdated);
-  webview.removeEventListener('permissionrequest', handlePermissionRequest);
+      webview.removeEventListener('permissionrequest', handlePermissionRequest);
   try { webview.removeEventListener('ipc-message', handleIpcMessage); } catch {}
   window.removeEventListener('message', handleMessage);
   webview.removeEventListener('wheel', handleWheel);
@@ -735,6 +745,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   }
 
   return (
+    <OnboardingProvider steps={defaultOnboardingSteps}>
     <div className="webview-container">
   {(() => { try { console.log('[WebView] rendering webview with preload ->', wvPreload); } catch {} return null; })()}
       {/* Spinner overlay removed: progress now shown as a slim bar in the navigation area */}
@@ -752,25 +763,36 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
             color: getComputedStyle(document.documentElement).getPropertyValue('--fg') || undefined
           }}>🌤️ NebulaBrowser</h1>
           <p style={{ marginBottom: 16 }}>Tip: Cmd/Ctrl+L to focus the address bar, Cmd/Ctrl+T to open a new tab.</p>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, width:'min(900px, 90vw)' }}>
-            {/* Add Tile card */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, width:'min(900px, 90vw)' }}>
+            {/* Add Tile card using SVG icon */}
             <button onClick={()=>{ setTileForm({ title:'', url:'' }); setShowAddTile(true); }} style={{
               display:'flex', flexDirection:'column', alignItems:'center', gap:8,
               background:'var(--card-bg)', color:'var(--fg)', border:'1px dashed var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
             }} title="Add a site to Home">
-              <div style={{ width:32, height:32, borderRadius:8, background:'color-mix(in srgb, var(--accent) 15%, transparent)', display:'flex', alignItems:'center', justifyContent:'center' }}>＋</div>
+              <IconAdd size={44} />
               <div style={{ fontWeight:600, fontSize:14, textAlign:'center' }}>Add Tile</div>
             </button>
             {(settings?.homeTiles || []).map((tile, i) => (
-              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} style={{
+              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} aria-label={tile?.title || tile?.url} style={{
                 display:'flex', flexDirection:'column', alignItems:'center', gap:8,
                 background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
               }}>
-                {tile?.icon ? (
-                  <img alt="" src={tile.icon} style={{ width:32, height:32, objectFit:'contain' }} />
-                ) : (
-                  <div style={{ width:32, height:32, borderRadius:8, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>
-                )}
+                {/* Render site SVG icons based on known hostnames for crisp vector logos */}
+                <div style={{ width:36, height:36 }}>
+                  {(() => {
+                    try {
+                      const host = (tile?.url && new URL(tile.url).hostname) || '';
+                      if (host.includes('github')) return <IconGitHub size={36} />;
+                      if (host.includes('nytimes')) return <IconNYTimes size={36} />;
+                      if (host.includes('duckduckgo')) return <IconDuckDuckGo size={36} />;
+                      if (host.includes('youtube')) return <IconYouTube size={36} />;
+                      if (host.includes('espn')) return <IconESPN size={36} />;
+                      if (host.includes('skysports') || host.includes('sky')) return <IconSky size={36} />;
+                      // fallback: small link icon
+                      return <div style={{ width:36, height:36, borderRadius:6, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>;
+                    } catch { return null; }
+                  })()}
+                </div>
                 <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
               </button>
             ))}
@@ -785,7 +807,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                   <input placeholder="Title (optional)" value={tileForm.title} onChange={(e)=> setTileForm(f=>({ ...f, title: e.target.value }))} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'var(--bg)', color:'var(--fg)' }} />
                   <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:4 }}>
                     <button onClick={()=>setShowAddTile(false)} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'transparent', cursor:'pointer' }}>Cancel</button>
-                    <button onClick={async ()=>{
+          <button onClick={async ()=>{
                       try {
                         const ensureUrl = (u)=>{ let s=String(u||'').trim(); if(!s) return ''; if(!/^https?:\/\//i.test(s)){ s='https://'+s; } return s; };
                         const u = ensureUrl(tileForm.url);
@@ -802,6 +824,8 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                         else next.unshift({ title, url: u, icon });
                         await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: next });
                         setShowAddTile(false);
+            // Onboarding completion event for customize step
+            try { window.dispatchEvent(new CustomEvent('nebula-onboarding-action', { detail:{ stepId:'customize' } })); } catch {}
                       } catch {}
                     }} style={{ padding:'8px 10px', border:'1px solid var(--accent)', borderRadius:8, background:'var(--accent)', color:'#fff', cursor:'pointer' }}>Save</button>
                   </div>
@@ -846,7 +870,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           <div className={`arrow ${swipeIndicator.ignored ? 'ghost' : ''}`}>{swipeIndicator.dir === 'right' ? '←' : '→'}</div>
         </div>
       )}
+      <OnboardingOverlay />
     </div>
+    </OnboardingProvider>
   );
 };
 

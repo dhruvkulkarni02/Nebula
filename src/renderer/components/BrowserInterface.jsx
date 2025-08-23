@@ -5,7 +5,6 @@ import BookmarksPanel from './BookmarksPanel';
 import HistoryPanel from './HistoryPanel';
 import DownloadsManager from './DownloadsManager';
 import SettingsPanel from './SettingsPanel';
-import OnboardingModal from './OnboardingModal';
 import '../styles/BrowserInterface.css';
 
 const BrowserInterface = ({
@@ -51,6 +50,8 @@ const BrowserInterface = ({
           let list = await window.electronAPI.getBookmarks();
           const s = await window.electronAPI.getSettings();
           setSettings(s || {});
+          // Initialize onboarding visibility right away from the first settings snapshot
+          // (legacy) onboarding visibility flag removed; new onboarding handled globally
           setShowBookmarksBar(!!s?.showBookmarksBarDefault);
           try {
             document.documentElement.setAttribute('data-reduce-motion', s?.reduceMotion ? 'true' : 'false');
@@ -372,19 +373,28 @@ const BrowserInterface = ({
       const [moved] = segment.splice(segFrom, 1);
       segment.splice(segTo, 0, moved);
       // Write back segment into arr
+      let changed = false;
       segmentIdxs.forEach((arrIdx, k) => {
+        if (arr[arrIdx] !== segment[k]) changed = true;
         arr[arrIdx] = segment[k];
       });
+      // Onboarding: mark tab step complete if user successfully reordered within horizontal bar
+      if (changed && (settings?.tabsLayout || 'top') !== 'vertical-left') {
+        try { const ev = new CustomEvent('nebula-onboarding-action', { detail: { stepId: 'tabs' } }); window.dispatchEvent(ev); } catch {}
+      }
       return arr;
     });
   };
 
   // Reset dragging state on dragend (when user stops dragging without dropping)
   const handleTabDragEnd = (e) => {
-    dragIndexRef.current = null;
-    draggingTabIdRef.current = null;
-    setIsDraggingTab(false);
-  setDraggedTabId(null);
+    // Small delay to allow drop events to process before hiding the drop zone
+    setTimeout(() => {
+      dragIndexRef.current = null;
+      draggingTabIdRef.current = null;
+      setIsDraggingTab(false);
+      setDraggedTabId(null);
+    }, 100);
   };
 
   const handleTabUrlChange = (tabId, newUrl, title = '') => {
@@ -398,6 +408,17 @@ const BrowserInterface = ({
     const favicon = Array.isArray(favicons) && favicons.length ? favicons[0] : null;
     setTabs(prevTabs => prevTabs.map(tab => tab.id === tabId ? { ...tab, favicon } : tab));
   };
+
+  // Onboarding: search completion detection (Enter pressed handled at higher level in NavigationBar; fallback here if URL changes away from about:blank)
+  useEffect(()=>{
+    try {
+      const active = tabs.find(t=>t.id===activeTabId);
+      if (active && active.url && active.url !== 'about:blank') {
+        const ev = new CustomEvent('nebula-onboarding-action', { detail: { stepId: 'search' } });
+        window.dispatchEvent(ev);
+      }
+    } catch {}
+  }, [tabs, activeTabId]);
 
   // Tab context menu actions
   const handlePinToggle = (tabId) => {
@@ -537,17 +558,10 @@ const BrowserInterface = ({
     } catch {}
   };
 
+  // Legacy NebulaOnboarding removed (new onboarding handled via OnboardingProvider in WebView root)
   return (
     <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
-      {/* Onboarding: show once when settings.onboardingSeen is not true */}
-      { !settings?.onboardingSeen && (
-        <OnboardingModal
-          initialAdblockEnabled={settings?.adBlockEnabled}
-          onClose={() => {
-            try { setSettings(prev => ({ ...(prev || {}), onboardingSeen: true })); } catch {}
-          }}
-        />
-      )}
+  {/* Onboarding overlay removed here */}
   {/* Left-edge drop zone: appear while dragging a tab to allow enabling vertical tabs */}
   {isDraggingTab && (
     <div
@@ -558,6 +572,7 @@ const BrowserInterface = ({
               const next = { ...(settings || {}), tabsLayout: 'vertical-left' };
               await window.electronAPI?.updateSettings?.(next);
               setSettings(next);
+              try { const ev = new CustomEvent('nebula-onboarding-action', { detail: { stepId: 'tabs' } }); window.dispatchEvent(ev); } catch {}
 
               // Move the dragged tab into the visible vertical list and activate it
               const draggedId = draggingTabIdRef.current;
@@ -595,7 +610,7 @@ const BrowserInterface = ({
               setIsDraggingTab(false);
             }
       }}
-      style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: 44, zIndex: 1500, background: 'linear-gradient(90deg, rgba(59,130,246,0.06), transparent)', pointerEvents: 'auto' }}
+      style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: 120, zIndex: 6000, background: 'linear-gradient(90deg, rgba(59,130,246,0.5), rgba(59,130,246,0.2))', pointerEvents: 'auto', border: '3px dashed rgba(59,130,246,0.8)', borderLeft: 'none', borderTop: 'none', borderBottom: 'none' }}
     />
   )}
   {/* Tab Bar (hidden when vertical tabs are enabled) */}
@@ -688,7 +703,7 @@ const BrowserInterface = ({
   }}
   />)}
 
-      {pageLoading && (
+  {pageLoading && (
         <div className="top-progress">
           <div className="top-progress-inner" style={{ width: `${Math.max(10, Math.min(100, pageProgress || 0))}%` }} />
         </div>
@@ -818,7 +833,7 @@ const BrowserInterface = ({
         />
       </div>
 
-      { (settings?.navBarPosition || 'top') === 'bottom' && (
+  { (settings?.navBarPosition || 'top') === 'bottom' && (
         <NavigationBar
           currentUrl={currentUrl}
           isLoading={pageLoading}

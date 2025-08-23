@@ -33,6 +33,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeBookmark: (url) => ipcRenderer.invoke('remove-bookmark', url),
   exportBookmarks: () => ipcRenderer.invoke('export-bookmarks'),
   importBookmarksFromPath: (filePath) => ipcRenderer.invoke('import-bookmarks', filePath),
+  importBookmarksFromBrowser: (browser) => ipcRenderer.invoke('import-bookmarks-from-browser', browser),
+  resetBrowserData: () => ipcRenderer.invoke('reset-browser-data'),
+  onBrowserDataReset: (callback) => {
+    try { ipcRenderer.on('browser-data-reset', () => { try { callback && callback(); } catch {} }); } catch {}
+  },
   importBookmarksData: (bookmarksArray) => ipcRenderer.invoke('import-bookmarks-data', bookmarksArray),
   updateBookmarkMeta: (url, meta) => ipcRenderer.invoke('update-bookmark-meta', url, meta),
   dedupeBookmarks: () => ipcRenderer.invoke('dedupe-bookmarks'),

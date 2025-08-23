@@ -321,6 +321,10 @@ const AD_URL_PATTERNS = [
   /yandex.*ads?/i
 ];
 
+// Simple in-memory cache to avoid repeated expensive evaluations for the same URL
+const adDecisionCache = new Map(); // key -> { action: 'allow'|'cancel'|'redirect', redirectURL?: string }
+const AD_CACHE_MAX = 5000;
+
 // Whitelist common search suggestion endpoints so autocomplete/suggestions keep working
 const SUGGESTION_URL_PATTERNS = [
   /complete\/search/i,            // google suggestion endpoints (complete/search)
@@ -953,32 +957,45 @@ function configureSessionSecurity() {
           }
         } catch {}
 
+        // Compute a small cache key and short-circuit repeated decisions
+        const cacheKey = `${details.url}||${details.resourceType || 'unknown'}`;
+        try {
+          const cached = adDecisionCache.get(cacheKey);
+          if (cached) {
+            if (cached.action === 'allow') { adBlockStats.allowed++; return callback({}); }
+            if (cached.action === 'cancel') { adBlockStats.blocked++; return callback({ cancel: true }); }
+            if (cached.action === 'redirect' && cached.redirectURL) { adBlockStats.blocked++; return callback({ redirectURL: cached.redirectURL }); }
+          }
+        } catch (e) {}
+
         // Only consider blocking for non-mainFrame resources and types we target
         if (!adBlockEnabled || details.resourceType === 'mainFrame' || !BLOCKED_TYPES.has(details.resourceType)) {
           adBlockStats.allowed++;
+          try { adDecisionCache.set(cacheKey, { action: 'allow' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
           return callback({});
         }
 
         // Respect allowlist early
         const ref = details.referrer || (details.requestHeaders && (details.requestHeaders.Referer || details.requestHeaders.referer)) || '';
         const refHost = hostnameFromUrl(ref);
-        if (refHost && adBlockAllowlist.has(refHost)) { adBlockStats.allowed++; return callback({}); }
+  if (refHost && adBlockAllowlist.has(refHost)) { adBlockStats.allowed++; try { adDecisionCache.set(cacheKey, { action: 'allow' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({}); }
 
         // Never block suggestion/autocomplete endpoints
         try {
           for (const sre of SUGGESTION_URL_PATTERNS) {
-            if (sre.test(details.url)) { adBlockStats.allowed++; return callback({}); }
+            if (sre.test(details.url)) { adBlockStats.allowed++; try { adDecisionCache.set(cacheKey, { action: 'allow' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({}); }
           }
         } catch {}
 
         // Bypass ad blocking for critical video/asset hosts (conservative allowlist)
         try {
           const reqHost = hostnameFromUrl(details.url);
-          if (reqHost) {
+            if (reqHost) {
             for (const ch of CRITICAL_HOSTS) {
               if (hostMatchesSuffix(reqHost, ch) || reqHost === ch) {
                 adBlockStats.allowed++;
                 console.log(`[AdBlock][bypass] host=${reqHost} reason=critical-site url=${details.url}`);
+                try { adDecisionCache.set(cacheKey, { action: 'allow' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({});
               }
             }
@@ -1004,12 +1021,14 @@ function configureSessionSecurity() {
                 adBlockStats.blocked++;
                 console.log(`[AdBlock][blocked] source=electron-blocker reason=redirect url=${details.url} type=${details.resourceType}`);
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'redirect', url: details.url, type: details.resourceType, redirect: !!redirect.dataUrl, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+                try { adDecisionCache.set(cacheKey, { action: 'redirect', redirectURL: redirect.dataUrl }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ redirectURL: redirect.dataUrl });
               }
               if (match) {
                 adBlockStats.blocked++;
                 console.log(`[AdBlock][blocked] source=electron-blocker url=${details.url} type=${details.resourceType}`);
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'match', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+                try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ cancel: true });
               }
             } catch (e) {
@@ -1031,12 +1050,12 @@ function configureSessionSecurity() {
             for (const ex of (filterEngine.exceptions || [])) try { if (urlLower.includes(ex.toLowerCase())) { excepted = true; break; } } catch {}
             if (!excepted) {
               for (const hs of (filterEngine.hostSuffixes || [])) {
-                if (!hs) continue; if (host === hs || host.endsWith('.' + hs)) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-host-suffix url=${details.url}`); try { pushBlockedEntry({ source: 'local-host-suffix', url: details.url, type: details.resourceType, reqHost: host, matchedHostSuffix: hs }); } catch (e) {} return callback({ cancel: true }); }
+                if (!hs) continue; if (host === hs || host.endsWith('.' + hs)) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-host-suffix url=${details.url}`); try { pushBlockedEntry({ source: 'local-host-suffix', url: details.url, type: details.resourceType, reqHost: host, matchedHostSuffix: hs }); } catch (e) {} try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({ cancel: true }); }
               }
               let matched = false;
               for (const sub of (filterEngine.substrings || [])) { try { if (!sub) continue; if (urlLower.includes(sub)) { matched = true; break; } } catch {} }
               if (!matched) { for (const re of (filterEngine.regexes || [])) try { if (re.test(details.url)) { matched = true; break; } } catch {} }
-              if (matched) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-parser url=${details.url}`); try { pushBlockedEntry({ source: 'local-parser', url: details.url, type: details.resourceType, reqHost: host }); } catch (e) {} return callback({ cancel: true }); }
+              if (matched) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-parser url=${details.url}`); try { pushBlockedEntry({ source: 'local-parser', url: details.url, type: details.resourceType, reqHost: host }); } catch (e) {} try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({ cancel: true }); }
             }
           }
         } catch (e) {}
@@ -1046,6 +1065,7 @@ function configureSessionSecurity() {
           adBlockStats.blocked++;
           console.log(`[AdBlock][blocked] source=heuristic url=${details.url} type=${details.resourceType}`);
           try { pushBlockedEntry({ source: 'heuristic', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+          try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
           return callback({ cancel: true });
         }
 
@@ -1675,6 +1695,35 @@ function setupIpcHandlers() {
     return { success: ok, settings: updated };
   });
 
+  // Factory reset: clear settings + bookmarks (and mark onboarding incomplete)
+  ipcMain.handle('reset-browser-data', async () => {
+    try {
+      // Clear settings file
+      try {
+        const p = getSettingsPath();
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (e) { console.warn('reset: settings unlink failed', e); }
+      // Clear bookmarks file
+      try {
+        const bp = path.join(app.getPath('userData'), 'bookmarks.json');
+        if (fs.existsSync(bp)) fs.unlinkSync(bp);
+      } catch (e) { console.warn('reset: bookmarks unlink failed', e); }
+      // In-memory state resets
+      adBlockEnabled = true;
+      adBlockAllowlist = new Set();
+      // Broadcast to renderers so they can purge any cached UI state
+      try {
+        const { BrowserWindow } = require('electron');
+        for (const w of BrowserWindow.getAllWindows()) {
+          try { w.webContents.send('browser-data-reset'); } catch {}
+        }
+      } catch {}
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e?.message || String(e) };
+    }
+  });
+
   // Site permissions get/set
   ipcMain.handle('get-site-permissions', async (event, origin) => {
     try {
@@ -1955,6 +2004,161 @@ function setupIpcHandlers() {
     } catch (e) {
       console.error('Import bookmarks data failed:', e);
       return { success: false, error: e.message };
+    }
+  });
+
+  // Import bookmarks directly from installed browsers (best-effort)
+  ipcMain.handle('import-bookmarks-from-browser', async (event, browser) => {
+    try {
+      // Browser can be 'chrome', 'edge', 'firefox', 'safari' or 'auto'
+      const platform = process.platform; // 'darwin'|'win32'|'linux'
+      const tryPaths = [];
+      const results = [];
+
+      const pushIfExists = (p) => { try { if (p && fs.existsSync(p)) tryPaths.push(p); } catch (e) {} };
+
+      if (!browser || browser === 'auto') {
+        // prefer Chromium-based then Firefox then Safari
+        browser = 'auto';
+      }
+
+      // macOS common locations
+      if (platform === 'darwin') {
+        const home = app.getPath('home');
+        if (browser === 'chrome' || browser === 'auto') {
+          pushIfExists(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'edge' || browser === 'auto') {
+          pushIfExists(path.join(home, 'Library', 'Application Support', 'Microsoft Edge', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'firefox' || browser === 'auto') {
+          const profilesDir = path.join(home, 'Library', 'Application Support', 'Firefox', 'Profiles');
+          try { if (fs.existsSync(profilesDir)) { const dirs = fs.readdirSync(profilesDir); for (const d of dirs) { pushIfExists(path.join(profilesDir, d, 'bookmarkbackups')); } } } catch (e) {}
+        }
+        if (browser === 'safari' || browser === 'auto') {
+          pushIfExists(path.join(home, 'Library', 'Safari', 'Bookmarks.plist'));
+        }
+      }
+
+      // Windows common locations
+      if (platform === 'win32') {
+        const home = app.getPath('home');
+        if (browser === 'chrome' || browser === 'auto') {
+          pushIfExists(path.join(home, 'AppData', 'Local', 'Google', 'Chrome', 'User Data', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'edge' || browser === 'auto') {
+          pushIfExists(path.join(home, 'AppData', 'Local', 'Microsoft', 'Edge', 'User Data', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'firefox' || browser === 'auto') {
+          const profilesDir = path.join(home, 'AppData', 'Roaming', 'Mozilla', 'Firefox', 'Profiles');
+          try { if (fs.existsSync(profilesDir)) { const dirs = fs.readdirSync(profilesDir); for (const d of dirs) { pushIfExists(path.join(profilesDir, d, 'bookmarkbackups')); } } } catch (e) {}
+        }
+      }
+
+      // Linux common locations
+      if (platform === 'linux') {
+        const home = app.getPath('home');
+        if (browser === 'chrome' || browser === 'auto') {
+          pushIfExists(path.join(home, '.config', 'google-chrome', 'Default', 'Bookmarks'));
+          pushIfExists(path.join(home, '.config', 'chromium', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'edge' || browser === 'auto') {
+          pushIfExists(path.join(home, '.config', 'microsoft-edge', 'Default', 'Bookmarks'));
+        }
+        if (browser === 'firefox' || browser === 'auto') {
+          const profilesDir = path.join(home, '.mozilla', 'firefox');
+          try { if (fs.existsSync(profilesDir)) { const dirs = fs.readdirSync(profilesDir); for (const d of dirs) { pushIfExists(path.join(profilesDir, d, 'bookmarkbackups')); } } } catch (e) {}
+        }
+      }
+
+      // Try each discovered path in order
+      for (const p of tryPaths) {
+        try {
+          if (p.toLowerCase().endsWith('bookmarks')) {
+            // Chromium JSON format
+            const raw = fs.readFileSync(p, 'utf8');
+            const parsed = JSON.parse(raw);
+            // Walk bookmarks tree
+            const walk = (node) => {
+              if (!node) return;
+              if (Array.isArray(node)) { node.forEach(walk); return; }
+              if (node.type === 'url' || node.url) {
+                results.push({ url: node.url || node.uri, title: node.name || node.title || node.url });
+              }
+              if (node.children) node.children.forEach(walk);
+            };
+            if (parsed.roots) {
+              Object.values(parsed.roots).forEach(r => walk(r));
+            } else {
+              walk(parsed);
+            }
+          } else if (p.toLowerCase().endsWith('bookmarks.plist') || p.toLowerCase().endsWith('bookmarks.plist')) {
+            // Safari plist
+            try {
+              const plist = require('plist');
+              const raw = fs.readFileSync(p, 'utf8');
+              const parsed = plist.parse(raw);
+              // parsed.Children -> traverse
+              const walkSafari = (arr) => {
+                if (!Array.isArray(arr)) return;
+                for (const it of arr) {
+                  try {
+                    if (it.URIDictionary && it.URLString) {
+                      results.push({ url: it.URLString, title: (it.URIDictionary && Object.values(it.URIDictionary)[0]) || it.Title || it.URLString });
+                    }
+                    if (it.Children) walkSafari(it.Children);
+                  } catch (e) {}
+                }
+              };
+              if (parsed && parsed.Children) walkSafari(parsed.Children);
+            } catch (e) {
+              // plist parser may not be available; skip
+            }
+          } else if (p.toLowerCase().endsWith('bookmarkbackups') || p.toLowerCase().includes('bookmarkbackup')) {
+            // Firefox bookmark backups: JSON files inside directory
+            try {
+              const files = fs.readdirSync(p).filter(f => f.endsWith('.json') || f.endsWith('.jsonlz4') );
+              // Prefer latest JSON if present
+              const jsonFiles = files.filter(f => f.endsWith('.json'));
+              if (jsonFiles.length > 0) {
+                const latest = jsonFiles.sort().reverse()[0];
+                const raw = fs.readFileSync(path.join(p, latest), 'utf8');
+                const parsed = JSON.parse(raw);
+                const walkFF = (node) => {
+                  if (!node) return;
+                  if (Array.isArray(node)) return node.forEach(walkFF);
+                  if (node.type === 'text/x-moz-place' && node.uri) results.push({ url: node.uri, title: node.title || node.uri });
+                  if (node.children) node.children.forEach(walkFF);
+                };
+                if (parsed.children) walkFF(parsed.children);
+              }
+            } catch (e) {}
+          }
+        } catch (e) {
+          // ignore parse errors per-path
+        }
+        if (results.length > 0) break; // stop if we found something
+      }
+
+      // Normalize and dedupe
+      const seen = new Set(); const out = [];
+      for (const r of results) {
+        try {
+          const url = (r.url || '').trim(); if (!url) continue; if (seen.has(url)) continue; seen.add(url); out.push({ url, title: r.title || url, dateAdded: new Date().toISOString() });
+        } catch (e) {}
+      }
+
+      if (out.length === 0) {
+        return { success: false, error: 'No bookmarks found' };
+      }
+
+      // Hand to existing import pipeline
+      const res = await ipcMain.emit ? await event.sender.invoke('import-bookmarks-data', out) : null;
+      // If invoke returned, it will be handled by import-bookmarks-data handler; but event.sender.invoke isn't guaranteed here; instead call directly
+      try { const r2 = await (async () => { const existing = loadBookmarks(); const map = new Map(existing.map(b => [b.url, b])); for (const b of out) { map.set(b.url, { url: b.url, title: b.title || b.url, dateAdded: b.dateAdded || new Date().toISOString() }); } const merged = Array.from(map.values()); saveBookmarks(merged); return { success: true, count: merged.length }; })(); return r2; } catch (e) { return { success: false, error: e.message }; }
+    } catch (e) {
+      console.error('import-bookmarks-from-browser failed', e);
+      return { success: false, error: e?.message || String(e) };
     }
   });
 }

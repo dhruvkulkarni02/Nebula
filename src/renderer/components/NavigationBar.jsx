@@ -566,6 +566,23 @@ const NavigationBar = ({
         {(settings?.toolbarButtons?.find !== false) && (<button className="menu-button" title="Find in page (Ctrl+F)" onClick={onOpenFind} disabled={!currentUrl || currentUrl === 'about:blank'}>🔍</button>)}
     <button className="menu-button" title="Reader mode" onClick={() => onToggleReader && onToggleReader()} disabled={!currentUrl || currentUrl === 'about:blank'}>📖</button>
         {(settings?.toolbarButtons?.downloads !== false) && (<button className="menu-button" title="Downloads" onClick={onShowDownloads}>📥</button>)}
+        {/* Reset & restart onboarding */}
+        <button
+          className="menu-button"
+          title="Reset browser data & restart onboarding"
+          onClick={async () => {
+            try {
+              if (!window.confirm('Reset all settings, bookmarks & restart onboarding?')) return;
+              await window.electronAPI?.resetBrowserData?.();
+              // ensure LS flag cleared then trigger restart
+              try { localStorage.removeItem('nebula:onboardingSeen'); } catch {}
+              if (window.NebulaOnboarding?.restart) window.NebulaOnboarding.restart(true); else {
+                const ev = new CustomEvent('nebula-onboarding-restart');
+                window.dispatchEvent(ev);
+              }
+            } catch (e) { console.error('Reset failed', e); }
+          }}
+        >🗑️</button>
         {/* Add to Home (start page tile) */}
         <button
           className="menu-button"
@@ -595,7 +612,11 @@ const NavigationBar = ({
       <button
         className="menu-button"
         title="Settings"
-        onClick={onOpenSettings}
+        onClick={() => {
+          onOpenSettings();
+          // Onboarding completion event for settings step
+          try { window.dispatchEvent(new CustomEvent('nebula-onboarding-action', { detail:{ stepId:'settings' } })); } catch {}
+        }}
       >
         ⚙️
       </button>
