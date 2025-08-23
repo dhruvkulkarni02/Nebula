@@ -20,6 +20,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [tileContextMenu, setTileContextMenu] = useState({ open: false, x: 0, y: 0, tileIndex: null });
   const [editingTile, setEditingTile] = useState(null);
   const [draggedTileIndex, setDraggedTileIndex] = useState(null);
+  
   const partitionNameRef = useRef('webview');
   const [wvPreload, setWvPreload] = useState(() => {
     try {
@@ -1181,6 +1182,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
         onClose={() => setShowFind(false)}
         webviewRef={webviewRef}
       />
+      
       {/* Swipe indicator overlay */}
       {swipeIndicator && swipeIndicator.visible && (
         // Map token directly: 'right' token => navigate back (show left/back arrow),

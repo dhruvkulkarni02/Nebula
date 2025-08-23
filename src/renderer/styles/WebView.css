@@ -288,3 +288,43 @@
 .privacy-warning .blocked-icon {
   background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
 }
+
+/* Nebula Features Animations */
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes gentle-fade {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.nebula-features-panel:hover {
+  opacity: 1 !important;
+}
+
+/* Responsive adjustments for features panel */
+@media (max-width: 768px) {
+  .nebula-features-panel {
+    bottom: 10px !important;
+    left: 10px !important;
+    font-size: 11px !important;
+    padding: 10px !important;
+  }
+  
+  .spatial-mode-indicator {
+    padding: 15px 20px !important;
+    font-size: 16px !important;
+  }
+}
