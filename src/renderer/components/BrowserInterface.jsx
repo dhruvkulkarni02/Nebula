@@ -346,10 +346,12 @@ const BrowserInterface = ({
     const from = dragIndexRef.current;
     const to = index;
     dragIndexRef.current = null;
-  draggingTabIdRef.current = null;
-  setIsDraggingTab(false);
-  setDraggedTabId(null);
+    draggingTabIdRef.current = null;
+    setIsDraggingTab(false);
+    setDraggedTabId(null);
+    
     if (from == null || from === to) return;
+    
     // Reorder within pinned or within normal segment only
     const fromTab = displayTabs[from];
     const toTab = displayTabs[to];
@@ -388,7 +390,7 @@ const BrowserInterface = ({
 
   // Reset dragging state on dragend (when user stops dragging without dropping)
   const handleTabDragEnd = (e) => {
-    // Small delay to allow drop events to process before hiding the drop zone
+    // Small delay to allow drop events to process
     setTimeout(() => {
       dragIndexRef.current = null;
       draggingTabIdRef.current = null;
@@ -562,57 +564,6 @@ const BrowserInterface = ({
   return (
     <div className="browser-interface" onClick={() => tabMenu.open && setTabMenu({ open: false, x: 0, y: 0, tabId: null })}>
   {/* Onboarding overlay removed here */}
-  {/* Left-edge drop zone: appear while dragging a tab to allow enabling vertical tabs */}
-  {isDraggingTab && (
-    <div
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-      onDrop={async (e) => {
-        e.preventDefault();
-            try {
-              const next = { ...(settings || {}), tabsLayout: 'vertical-left' };
-              await window.electronAPI?.updateSettings?.(next);
-              setSettings(next);
-              try { const ev = new CustomEvent('nebula-onboarding-action', { detail: { stepId: 'tabs' } }); window.dispatchEvent(ev); } catch {}
-
-              // Move the dragged tab into the visible vertical list and activate it
-              const draggedId = draggingTabIdRef.current;
-              if (draggedId != null) {
-                setTabs(prev => {
-                  const idx = prev.findIndex(t => t.id === draggedId);
-                  if (idx === -1) return prev;
-                  const tab = prev[idx];
-                  const nextArr = [...prev.filter((t) => t.id !== draggedId)];
-                  // Insert the tab at the front of the normal (non-pinned) segment
-                  const insertAt = nextArr.findIndex(t => !t.pinned);
-                  if (insertAt === -1) {
-                    nextArr.unshift({ ...tab, active: true });
-                  } else {
-                    nextArr.splice(insertAt, 0, { ...tab, active: true });
-                  }
-                  // Ensure only the moved tab is active
-                  return nextArr.map(t => ({ ...t, active: t.id === draggedId }));
-                });
-                setActiveTabId(draggedId);
-                // Navigate to the tab's URL so the content area reflects it
-                try {
-                  const t = tabs.find(x => x.id === draggedId) || null;
-                  if (t && t.url) {
-                    if (window.electronAPI) await window.electronAPI.navigateToUrl(t.url);
-                    onNavigate(t.url);
-                  }
-                } catch (err) {}
-              }
-            } catch (err) {
-              console.error('Failed to enable vertical tabs', err);
-            } finally {
-              dragIndexRef.current = null;
-              draggingTabIdRef.current = null;
-              setIsDraggingTab(false);
-            }
-      }}
-      style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: 120, zIndex: 6000, background: 'linear-gradient(90deg, rgba(59,130,246,0.5), rgba(59,130,246,0.2))', pointerEvents: 'auto', border: '3px dashed rgba(59,130,246,0.8)', borderLeft: 'none', borderTop: 'none', borderBottom: 'none' }}
-    />
-  )}
   {/* Tab Bar (hidden when vertical tabs are enabled) */}
   {(settings?.tabsLayout || 'top') !== 'vertical-left' && (
   <div className="tab-bar" onDoubleClick={handleNewTab}>
@@ -894,7 +845,7 @@ const BrowserInterface = ({
 
       {/* Tab Context Menu */}
       {tabMenu.open && (
-        <div className="context-menu" style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, zIndex: 1000, minWidth: 180 }} onClick={(e) => e.stopPropagation()}>
+        <div className="context-menu" style={{ position: 'fixed', left: tabMenu.x, top: tabMenu.y, zIndex: 15000, minWidth: 180 }} onClick={(e) => e.stopPropagation()}>
           <MenuItem label={(() => {
             const t = tabs.find(t => t.id === tabMenu.tabId);
             return t?.pinned ? 'Unpin tab' : 'Pin tab';

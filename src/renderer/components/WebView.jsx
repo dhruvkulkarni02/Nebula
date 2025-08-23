@@ -1,11 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
-import { IconGitHub } from './icons';
-import IconNYTimes from './icons/IconNYTimes';
-import IconDuckDuckGo from './icons/IconDuckDuckGo';
-import IconYouTube from './icons/IconYouTube';
-import IconESPN from './icons/IconESPN';
-import IconSky from './icons/IconSky';
 import IconAdd from './icons/IconAdd';
 import '../styles/WebView.css';
 import { OnboardingProvider } from './onboarding/OnboardingProvider';
@@ -23,6 +17,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
   const [showFind, setShowFind] = useState(false);
   const [showAddTile, setShowAddTile] = useState(false);
   const [tileForm, setTileForm] = useState({ title: '', url: '' });
+  const [tileContextMenu, setTileContextMenu] = useState({ open: false, x: 0, y: 0, tileIndex: null });
+  const [editingTile, setEditingTile] = useState(null);
+  const [draggedTileIndex, setDraggedTileIndex] = useState(null);
   const partitionNameRef = useRef('webview');
   const [wvPreload, setWvPreload] = useState(() => {
     try {
@@ -744,6 +741,89 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
     );
   }
 
+  // Tile management functions
+  const handleTileContextMenu = (e, tileIndex) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTileContextMenu({ 
+      open: true, 
+      x: e.clientX, 
+      y: e.clientY, 
+      tileIndex 
+    });
+  };
+
+  const handleDeleteTile = async (tileIndex) => {
+    try {
+      const tiles = settings?.homeTiles || [];
+      const newTiles = tiles.filter((_, i) => i !== tileIndex);
+      await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: newTiles });
+      setTileContextMenu({ open: false, x: 0, y: 0, tileIndex: null });
+    } catch (err) {
+      console.error('Failed to delete tile:', err);
+    }
+  };
+
+  const handleEditTile = (tileIndex) => {
+    const tile = (settings?.homeTiles || [])[tileIndex];
+    if (tile) {
+      setEditingTile({ ...tile, index: tileIndex });
+      setTileContextMenu({ open: false, x: 0, y: 0, tileIndex: null });
+    }
+  };
+
+  const handleSaveEditTile = async () => {
+    try {
+      if (!editingTile) return;
+      const tiles = [...(settings?.homeTiles || [])];
+      tiles[editingTile.index] = {
+        title: editingTile.title,
+        url: editingTile.url,
+        icon: editingTile.icon
+      };
+      await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: tiles });
+      setEditingTile(null);
+    } catch (err) {
+      console.error('Failed to save tile edit:', err);
+    }
+  };
+
+  const handleTileDragStart = (e, tileIndex) => {
+    setDraggedTileIndex(tileIndex);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', tileIndex.toString());
+  };
+
+  const handleTileDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleTileDrop = async (e, dropIndex) => {
+    e.preventDefault();
+    const dragIndex = draggedTileIndex;
+    
+    if (dragIndex === null || dragIndex === dropIndex) {
+      setDraggedTileIndex(null);
+      return;
+    }
+
+    try {
+      const tiles = [...(settings?.homeTiles || [])];
+      const [movedTile] = tiles.splice(dragIndex, 1);
+      tiles.splice(dropIndex, 0, movedTile);
+      await window.electronAPI?.updateSettings?.({ ...settings, homeTiles: tiles });
+      setDraggedTileIndex(null);
+    } catch (err) {
+      console.error('Failed to reorder tiles:', err);
+      setDraggedTileIndex(null);
+    }
+  };
+
+  const handleTileDragEnd = () => {
+    setDraggedTileIndex(null);
+  };
+
   return (
     <OnboardingProvider steps={defaultOnboardingSteps}>
     <div className="webview-container">
@@ -756,6 +836,11 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           backgroundSize: 'cover', backgroundPosition: 'center',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: 24
+        }} onClick={() => {
+          // Close context menu when clicking on the background
+          if (tileContextMenu.open) {
+            setTileContextMenu({ open: false, x: 0, y: 0, tileIndex: null });
+          }
         }}>
           <h1 style={{
             backdropFilter: settings?.homeWallpaper ? 'blur(4px)' : 'none',
@@ -773,25 +858,84 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
               <div style={{ fontWeight:600, fontSize:14, textAlign:'center' }}>Add Tile</div>
             </button>
             {(settings?.homeTiles || []).map((tile, i) => (
-              <button key={i} onClick={()=> onNavigate && tile?.url && onNavigate(tile.url)} aria-label={tile?.title || tile?.url} style={{
-                display:'flex', flexDirection:'column', alignItems:'center', gap:8,
-                background:'var(--card-bg)', color:'var(--fg)', border:'1px solid var(--border)', borderRadius:12, padding:'14px', cursor:'pointer'
-              }}>
-                {/* Render site SVG icons based on known hostnames for crisp vector logos */}
-                <div style={{ width:36, height:36 }}>
-                  {(() => {
-                    try {
-                      const host = (tile?.url && new URL(tile.url).hostname) || '';
-                      if (host.includes('github')) return <IconGitHub size={36} />;
-                      if (host.includes('nytimes')) return <IconNYTimes size={36} />;
-                      if (host.includes('duckduckgo')) return <IconDuckDuckGo size={36} />;
-                      if (host.includes('youtube')) return <IconYouTube size={36} />;
-                      if (host.includes('espn')) return <IconESPN size={36} />;
-                      if (host.includes('skysports') || host.includes('sky')) return <IconSky size={36} />;
-                      // fallback: small link icon
-                      return <div style={{ width:36, height:36, borderRadius:6, background:'var(--muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>🔗</div>;
-                    } catch { return null; }
-                  })()}
+              <button 
+                key={i} 
+                draggable
+                onClick={(e) => {
+                  // Don't navigate if right-clicking or dragging
+                  if (e.button !== 0 || draggedTileIndex !== null) return;
+                  onNavigate && tile?.url && onNavigate(tile.url);
+                }}
+                onContextMenu={(e) => handleTileContextMenu(e, i)}
+                onDragStart={(e) => handleTileDragStart(e, i)}
+                onDragOver={handleTileDragOver}
+                onDrop={(e) => handleTileDrop(e, i)}
+                onDragEnd={handleTileDragEnd}
+                aria-label={tile?.title || tile?.url} 
+                style={{
+                  display:'flex', 
+                  flexDirection:'column', 
+                  alignItems:'center', 
+                  gap:8,
+                  background:'var(--card-bg)', 
+                  color:'var(--fg)', 
+                  border:'1px solid var(--border)', 
+                  borderRadius:12, 
+                  padding:'14px', 
+                  cursor: draggedTileIndex === i ? 'grabbing' : 'pointer',
+                  opacity: draggedTileIndex === i ? 0.5 : 1,
+                  transform: draggedTileIndex === i ? 'rotate(5deg)' : 'none',
+                  transition: 'opacity 0.2s, transform 0.2s'
+                }}
+              >
+                {/* Render site icons using web-fetched favicons */}
+                <div style={{ width:36, height:36, position: 'relative' }}>
+                  {tile?.icon ? (
+                    <>
+                      <img 
+                        src={tile.icon} 
+                        alt={`${tile.title || tile.url} icon`}
+                        style={{ 
+                          width: 36, 
+                          height: 36, 
+                          borderRadius: 6,
+                          objectFit: 'contain',
+                          display: 'block'
+                        }}
+                        onError={(e) => {
+                          // If favicon fails to load, hide the img and show fallback
+                          e.target.style.display = 'none';
+                          e.target.nextElementSibling.style.display = 'flex';
+                        }}
+                      />
+                      {/* Fallback that shows when favicon fails to load */}
+                      <div style={{ 
+                        width:36, 
+                        height:36, 
+                        borderRadius:6, 
+                        background:'var(--muted)', 
+                        display:'none', 
+                        alignItems:'center', 
+                        justifyContent:'center',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        fontSize: '18px'
+                      }}>🌐</div>
+                    </>
+                  ) : (
+                    // No favicon available, show default web icon
+                    <div style={{ 
+                      width:36, 
+                      height:36, 
+                      borderRadius:6, 
+                      background:'var(--muted)', 
+                      display:'flex', 
+                      alignItems:'center', 
+                      justifyContent:'center',
+                      fontSize: '18px'
+                    }}>🌐</div>
+                  )}
                 </div>
                 <div style={{ fontWeight:600, fontSize:14, textAlign:'center', maxWidth:140, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{tile?.title || tile?.url}</div>
               </button>
@@ -806,7 +950,7 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                   <input placeholder="URL (https://...)" value={tileForm.url} onChange={(e)=> setTileForm(f=>({ ...f, url: e.target.value }))} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'var(--bg)', color:'var(--fg)' }} />
                   <input placeholder="Title (optional)" value={tileForm.title} onChange={(e)=> setTileForm(f=>({ ...f, title: e.target.value }))} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'var(--bg)', color:'var(--fg)' }} />
                   <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:4 }}>
-                    <button onClick={()=>setShowAddTile(false)} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'transparent', cursor:'pointer' }}>Cancel</button>
+                    <button onClick={()=>setShowAddTile(false)} style={{ padding:'8px 10px', border:'1px solid var(--border)', borderRadius:8, background:'transparent', color:'var(--fg)', cursor:'pointer' }}>Cancel</button>
           <button onClick={async ()=>{
                       try {
                         const ensureUrl = (u)=>{ let s=String(u||'').trim(); if(!s) return ''; if(!/^https?:\/\//i.test(s)){ s='https://'+s; } return s; };
@@ -816,7 +960,45 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
                         const host = (()=>{ try{ return new URL(u).hostname; }catch{return ''; }})();
                         if (!title) title = host || u;
                         const origin = (()=>{ try{ return new URL(u).origin; }catch{return ''; }})();
-                        const icon = origin ? origin + '/favicon.ico' : '';
+                        
+                        // Try to find a working favicon, starting with most reliable sources
+                        let icon = '';
+                        if (origin && host) {
+                          const possibleFavicons = [
+                            `https://www.google.com/s2/favicons?domain=${host}&sz=32`,  // Google's favicon service (most reliable)
+                            `https://icons.duckduckgo.com/ip3/${host}.ico`,  // DuckDuckGo's favicon service
+                            `${origin}/favicon.svg`,
+                            `${origin}/favicon.ico`,
+                            `${origin}/apple-touch-icon.png`,
+                            `${origin}/favicon-32x32.png`,
+                            `${origin}/favicon-16x16.png`
+                          ];
+                          
+                          // Test favicon by trying to load it as an image
+                          for (const faviconUrl of possibleFavicons) {
+                            try {
+                              await new Promise((resolve, reject) => {
+                                const img = new Image();
+                                img.onload = () => resolve();
+                                img.onerror = () => reject();
+                                img.src = faviconUrl;
+                                // Timeout after 2 seconds for faster loading
+                                setTimeout(() => reject(), 2000);
+                              });
+                              icon = faviconUrl;
+                              break;
+                            } catch {
+                              // Continue to next favicon option
+                              continue;
+                            }
+                          }
+                          
+                          // If no favicons work, default to Google's service which should always return something
+                          if (!icon) {
+                            icon = `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
+                          }
+                        }
+                        
                         const cur = (settings?.homeTiles || []);
                         const existingIdx = cur.findIndex(t => (t.url||'').trim() === u);
                         const next = [...cur];
@@ -828,6 +1010,143 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
             try { window.dispatchEvent(new CustomEvent('nebula-onboarding-action', { detail:{ stepId:'customize' } })); } catch {}
                       } catch {}
                     }} style={{ padding:'8px 10px', border:'1px solid var(--accent)', borderRadius:8, background:'var(--accent)', color:'#fff', cursor:'pointer' }}>Save</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tile Context Menu */}
+          {tileContextMenu.open && (
+            <div 
+              style={{ 
+                position: 'fixed', 
+                left: tileContextMenu.x, 
+                top: tileContextMenu.y, 
+                zIndex: 15000, 
+                minWidth: 160,
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: 4,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+              }} 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                onClick={() => handleEditTile(tileContextMenu.tileIndex)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  borderRadius: 4
+                }}
+                onMouseEnter={(e) => e.target.style.background = 'var(--accent-muted)'}
+                onMouseLeave={(e) => e.target.style.background = 'transparent'}
+              >
+                ✏️ Edit Tile
+              </button>
+              <button 
+                onClick={() => handleDeleteTile(tileContextMenu.tileIndex)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--fg)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  borderRadius: 4
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#ef4444'}
+                onMouseLeave={(e) => e.target.style.background = 'transparent'}
+              >
+                🗑️ Delete Tile
+              </button>
+            </div>
+          )}
+
+          {/* Edit Tile Modal */}
+          {editingTile && (
+            <div 
+              style={{ 
+                position:'fixed', 
+                inset:0, 
+                display:'flex', 
+                alignItems:'center', 
+                justifyContent:'center', 
+                background:'color-mix(in srgb, var(--bg) 40%, transparent)' 
+              }} 
+              onClick={() => setEditingTile(null)}
+            >
+              <div 
+                style={{ 
+                  background:'var(--panel)', 
+                  color:'var(--fg)', 
+                  border:'1px solid var(--border)', 
+                  borderRadius:12, 
+                  padding:16, 
+                  width:360 
+                }} 
+                onClick={(e)=>e.stopPropagation()}
+              >
+                <h3 style={{ marginBottom:8 }}>Edit Tile</h3>
+                <div style={{ display:'grid', gap:8 }}>
+                  <input 
+                    placeholder="URL (https://...)" 
+                    value={editingTile.url} 
+                    onChange={(e)=> setEditingTile(prev => ({ ...prev, url: e.target.value }))} 
+                    style={{ 
+                      padding:'8px 10px', 
+                      border:'1px solid var(--border)', 
+                      borderRadius:8, 
+                      background:'var(--bg)', 
+                      color:'var(--fg)' 
+                    }} 
+                  />
+                  <input 
+                    placeholder="Title" 
+                    value={editingTile.title} 
+                    onChange={(e)=> setEditingTile(prev => ({ ...prev, title: e.target.value }))} 
+                    style={{ 
+                      padding:'8px 10px', 
+                      border:'1px solid var(--border)', 
+                      borderRadius:8, 
+                      background:'var(--bg)', 
+                      color:'var(--fg)' 
+                    }} 
+                  />
+                  <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:4 }}>
+                    <button 
+                      onClick={() => setEditingTile(null)} 
+                      style={{ 
+                        padding:'8px 10px', 
+                        border:'1px solid var(--border)', 
+                        borderRadius:8, 
+                        background:'transparent', 
+                        color:'var(--fg)', 
+                        cursor:'pointer' 
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleSaveEditTile} 
+                      style={{ 
+                        padding:'8px 10px', 
+                        border:'1px solid var(--accent)', 
+                        borderRadius:8, 
+                        background:'var(--accent)', 
+                        color:'#fff', 
+                        cursor:'pointer' 
+                      }}
+                    >
+                      Save
+                    </button>
                   </div>
                 </div>
               </div>

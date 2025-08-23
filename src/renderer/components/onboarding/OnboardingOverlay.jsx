@@ -35,12 +35,21 @@ const Btn = styled.button`
 const Ghost = styled.button`background:transparent;border:1px solid rgba(255,255,255,0.15);color:#d2e9ff;padding:7px 12px;border-radius:10px;cursor:pointer;`;
 const Counter = styled.span`margin-left:auto;font-size:11px;color:#9bc6ed;`;
 
-const pulse = keyframes`0%{box-shadow:0 0 0 0 rgba(14,165,233,0.4);}70%{box-shadow:0 0 0 14px rgba(14,165,233,0);}100%{box-shadow:0 0 0 0 rgba(14,165,233,0);}`;
+const pulse = keyframes`
+  0%{box-shadow:0 0 0 0 rgba(14,165,233,0.6);}
+  70%{box-shadow:0 0 0 16px rgba(14,165,233,0);}
+  100%{box-shadow:0 0 0 0 rgba(14,165,233,0);}
+`;
+const pulseGold = keyframes`
+  0%{box-shadow:0 0 0 0 rgba(245,158,11,0.6);}
+  70%{box-shadow:0 0 0 16px rgba(245,158,11,0);}
+  100%{box-shadow:0 0 0 0 rgba(245,158,11,0);}
+`;
 // Highlight remains visual, but we'll layer an invisible interaction proxy for draggable steps.
 const Highlight = styled.div`
   position:fixed;border:3px solid #0ea5e9;border-radius:12px;pointer-events:none;z-index:4900;
-  animation:${pulse} 2s ease-out infinite;transition:all 260ms ease;
-  background:rgba(14,165,233,0.1);backdrop-filter:blur(2px);
+  animation:${p => p.isCustomize ? pulseGold : pulse} 2s ease-out infinite;transition:all 260ms ease;
+  background:rgba(14,165,233,0.1);
   box-shadow:0 0 0 1px rgba(14,165,233,0.3), 0 4px 20px rgba(14,165,233,0.25);
 `;
 
@@ -332,12 +341,20 @@ export function OnboardingOverlay(){
             <>
               <Dim variant={current?.id==='tabs'?'tabs':current?.id==='customize'?'customize':undefined} />
               {rect && (
-                <Highlight style={{
-                  left:rect.left, top:rect.top, width:rect.width, height:rect.height,
-                  borderColor: current?.id==='customize' ? '#ffd740' : undefined,
-                  boxShadow: current?.id==='customize' ? '0 0 0 3px rgba(255,215,64,0.55), 0 0 22px 10px rgba(255,200,50,0.45)' : undefined,
-                  pointerEvents:'none' // never intercept so native drag works
-                }} />
+                <Highlight 
+                  isCustomize={current?.id==='customize'}
+                  style={{
+                    left:rect.left, top:rect.top, width:rect.width, height:rect.height,
+                    borderColor: current?.id==='customize' ? '#f59e0b' : '#0ea5e9',
+                    borderWidth: current?.id==='customize' ? '4px' : '3px',
+                    background: current?.id==='customize' 
+                      ? 'rgba(245,158,11,0.15)' 
+                      : 'rgba(14,165,233,0.12)',
+                    boxShadow: current?.id==='customize' 
+                      ? '0 0 0 2px rgba(245,158,11,0.4), 0 0 20px 8px rgba(245,158,11,0.3), 0 4px 20px rgba(245,158,11,0.2)' 
+                      : '0 0 0 1px rgba(14,165,233,0.4), 0 4px 20px rgba(14,165,233,0.3)',
+                    pointerEvents:'none' // never intercept so native drag works
+                  }} />
               )}
               <div aria-live="polite" aria-atomic="true" style={{position:'fixed',width:1,height:1,overflow:'hidden',clip:'rect(0 0 0 0)'}} ref={liveRef} />
             </>

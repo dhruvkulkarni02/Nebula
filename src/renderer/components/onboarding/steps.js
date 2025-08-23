@@ -6,12 +6,12 @@ export const defaultOnboardingSteps = [
     id: 'tabs',
   title: 'Manage & Reorganize Tabs',
   // description now dynamic; base string acts as fallback (Overlay will augment if vertical layout detected)
-  description: 'Open, close, and reorder tabs. Drag a tab left/right to reorder, or drag it outward to snap into a vertical sidebar.',
+  description: 'Open, close, and reorder tabs. Drag a tab left or right to reorder them in the tab bar.',
   // Prefer a specific tab element for better highlight, fallback to bar or vertical list
   selector: '.tab-bar .tab.active, .tab-bar .tab, .content-area > div[style*="width: 220px"] .tab, .content-area > div[style*="width: 220px"]',
-  // Dynamic completion: vertical layout active OR event-based completion
+  // Dynamic completion: vertical layout active OR event-based completion (tab reordering)
   isComplete: () => !!document.querySelector('.tab-sidebar, .vertical-tabs, [data-tab-layout="vertical"], .content-area > div[style*="width: 220px"]'),
-  requireAction: true, // user must drag a tab OR enable vertical tabs
+  requireAction: true, // user must drag a tab to reorder OR enable vertical tabs through settings
   },
   {
     id: 'search',
