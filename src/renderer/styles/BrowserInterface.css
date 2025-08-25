@@ -202,9 +202,24 @@
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
   z-index: 10;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  width: 180px; /* reduced from default, adjust as needed */
-  min-width: 140px;
-  max-width: 220px;
+  min-width: 120px;
+  max-width: 320px;
+  position: relative;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 100;
+  background: transparent;
+  transition: background 0.2s;
+}
+.sidebar-resizer:hover {
+  background: rgba(59,130,246,0.08);
 }
 
 .sidebar.collapsed {
