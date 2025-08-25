@@ -1,3 +1,4 @@
+// Remove the duplicate WebView implementation above. Only keep the main, secure, modern WebView component and a single export default at the end of the file.
 import React, { useEffect, useRef, useState } from 'react';
 import FindInPage from './FindInPage';
 import IconAdd from './icons/IconAdd';
@@ -352,9 +353,9 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
       try { onLoadingChange && onLoadingChange(false); } catch {}
     };
 
-    // Wait for webview to be ready
+    // Wait for webview to be ready and open DevTools for troubleshooting blank content
     const handleDomReady = () => {
-  console.log('WebView DOM ready - url:', url, 'preload:', wvPreload);
+      console.log('WebView DOM ready - url:', url, 'preload:', wvPreload);
       // Don't set URL here - it's already set via the src attribute
       try {
         const wv = webviewRef.current;
@@ -384,6 +385,10 @@ const WebView = ({ url, isLoading, onUrlChange, onNavigate, onOpenFind, onStopAv
           })();`;
           try { wv.executeJavaScript(script).catch(() => {}); } catch {}
           wv.__nebulaGestureInjected = true;
+        }
+        // Open DevTools automatically for troubleshooting blank content
+        if (wv && wv.openDevTools) {
+          wv.openDevTools();
         }
       } catch (e) {}
     };

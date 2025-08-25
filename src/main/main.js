@@ -461,23 +461,26 @@ function createWindow() {
     configureSessionSecurity();
 
     // Create the browser window
-    mainWindow = new BrowserWindow({
-      width: 1200,
-      height: 800,
-      minWidth: 800,
-      minHeight: 600,
-      // macOS: enables rubber-banding; can improve gesture propagation
-      scrollBounce: true,
-      webPreferences: {
-        nodeIntegration: false, // Security: Disable node integration in renderer
-        contextIsolation: true, // Security: Enable context isolation
-        enableRemoteModule: false, // Security: Disable remote module
-        preload: path.join(__dirname, 'preload.js'), // Use preload script for secure communication
-        webSecurity: true, // Keep web security enabled
-        allowRunningInsecureContent: false, // Block insecure content
-        experimentalFeatures: false, // Disable experimental features
-        webviewTag: true // Enable webview tag for web content
-      },
+        mainWindow = new BrowserWindow({
+          width: 1200,
+          height: 800,
+          minWidth: 800,
+          minHeight: 600,
+          // macOS: enables rubber-banding; can improve gesture propagation
+          scrollBounce: true,
+          webPreferences: {
+            nodeIntegration: false, // Security: Disable node integration in renderer
+            contextIsolation: true, // Security: Enable context isolation
+            enableRemoteModule: false, // Security: Disable remote module
+            preload: path.join(__dirname, 'preload.js'), // Use preload script for secure communication
+            webSecurity: true, // Keep web security enabled
+            allowRunningInsecureContent: false, // Block insecure content
+            experimentalFeatures: false, // Disable experimental features
+            webviewTag: true, // Enable webview tag for web content
+            // Optionally: sandbox: true,
+            // Optionally: enableRemoteModule: false,
+            // Optionally: additionalArguments: [],
+          },
       icon: path.join(__dirname, '../../assets/icon.png'), // App icon
       show: false // Don't show until ready
     });
@@ -931,6 +934,10 @@ function configureSessionSecurity() {
   const BLOCKED_TYPES = new Set(['script', 'image', 'xhr', 'fetch', 'subFrame', 'media', 'beacon', 'ping', 'stylesheet', 'font', 'object', 'other']);
     ses.webRequest.onBeforeRequest((details, callback) => {
       try {
+        // Debug: Log all mainFrame navigations
+        if (details.resourceType === 'mainFrame') {
+          console.log(`[DEBUG][onBeforeRequest] mainFrame navigation: ${details.url}`);
+        }
         // HTTPS upgrade for top-level navigations (best-effort), but skip in dev for localhost
         try {
           const isMain = details.resourceType === 'mainFrame';
@@ -972,6 +979,9 @@ function configureSessionSecurity() {
         if (!adBlockEnabled || details.resourceType === 'mainFrame' || !BLOCKED_TYPES.has(details.resourceType)) {
           adBlockStats.allowed++;
           try { adDecisionCache.set(cacheKey, { action: 'allow' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
+          if (details.resourceType === 'mainFrame') {
+            console.log(`[DEBUG][onBeforeRequest] mainFrame allowed: ${details.url}`);
+          }
           return callback({});
         }
 
@@ -1020,6 +1030,14 @@ function configureSessionSecurity() {
               if (redirect) {
                 adBlockStats.blocked++;
                 console.log(`[AdBlock][blocked] source=electron-blocker reason=redirect url=${details.url} type=${details.resourceType}`);
+                // Prevent unsafe redirects (e.g., to data: URLs, file: URLs) for ALL resource types
+                if (redirect.dataUrl && (!redirect.dataUrl.startsWith('http://') && !redirect.dataUrl.startsWith('https://'))) {
+                  console.log(`[DEBUG][onBeforeRequest] BLOCKED unsafe redirect to: ${redirect.dataUrl} for type: ${details.resourceType} (allowing original request)`);
+                  return callback({}); // Allow original request, do not redirect
+                }
+                if (details.resourceType === 'mainFrame') {
+                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (redirect): ${details.url}`);
+                }
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'redirect', url: details.url, type: details.resourceType, redirect: !!redirect.dataUrl, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
                 try { adDecisionCache.set(cacheKey, { action: 'redirect', redirectURL: redirect.dataUrl }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ redirectURL: redirect.dataUrl });
@@ -1027,9 +1045,15 @@ function configureSessionSecurity() {
               if (match) {
                 adBlockStats.blocked++;
                 console.log(`[AdBlock][blocked] source=electron-blocker url=${details.url} type=${details.resourceType}`);
+                if (details.resourceType === 'mainFrame') {
+                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (match): ${details.url}`);
+                }
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'match', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
                 try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ cancel: true });
+                if (details.resourceType === 'mainFrame') {
+                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (local-host-suffix): ${details.url}`);
+                }
               }
             } catch (e) {
               // If any adblock evaluation error occurs, fall through to local heuristics
@@ -1056,6 +1080,9 @@ function configureSessionSecurity() {
               for (const sub of (filterEngine.substrings || [])) { try { if (!sub) continue; if (urlLower.includes(sub)) { matched = true; break; } } catch {} }
               if (!matched) { for (const re of (filterEngine.regexes || [])) try { if (re.test(details.url)) { matched = true; break; } } catch {} }
               if (matched) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-parser url=${details.url}`); try { pushBlockedEntry({ source: 'local-parser', url: details.url, type: details.resourceType, reqHost: host }); } catch (e) {} try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({ cancel: true }); }
+                if (details.resourceType === 'mainFrame') {
+                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (local-parser): ${details.url}`);
+                }
             }
           }
         } catch (e) {}
@@ -1064,6 +1091,9 @@ function configureSessionSecurity() {
         if (shouldBlockUrl(details.url) || isLikelyAdRequest(details)) {
           adBlockStats.blocked++;
           console.log(`[AdBlock][blocked] source=heuristic url=${details.url} type=${details.resourceType}`);
+          if (details.resourceType === 'mainFrame') {
+            console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (heuristic): ${details.url}`);
+          }
           try { pushBlockedEntry({ source: 'heuristic', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
           try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
           return callback({ cancel: true });

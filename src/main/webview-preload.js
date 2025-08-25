@@ -1,3 +1,13 @@
+
+// Securely expose APIs to the webview context using contextBridge
+try {
+  const { contextBridge, ipcRenderer } = require('electron');
+  contextBridge.exposeInMainWorld('electronAPI', {
+    disableAdblockFor: (hostname) => ipcRenderer.send('disable-adblock', hostname),
+    // Add other safe APIs here
+  });
+} catch {}
+
 // Runs inside the <webview> guest page context (isolated world)
 // Detect robust horizontal swipe gestures and notify host via sendToHost
 
