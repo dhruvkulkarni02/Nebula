@@ -1,0 +1,6 @@
+/* Dim address bar during onboarding first step */
+.onboarding-active-step-tabs .address-bar {
+  filter: brightness(0.7) grayscale(0.2);
+  opacity: 0.7;
+  transition: filter 0.2s, opacity 0.2s;
+}

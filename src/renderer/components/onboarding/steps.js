@@ -4,14 +4,19 @@
 export const defaultOnboardingSteps = [
   {
     id: 'tabs',
-  title: 'Manage & Reorganize Tabs',
-  // description now dynamic; base string acts as fallback (Overlay will augment if vertical layout detected)
-  description: 'Open, close, and reorder tabs. Drag a tab left or right to reorder them in the tab bar.',
-  // Prefer a specific tab element for better highlight, fallback to bar or vertical list
-  selector: '.tab-bar .tab.active, .tab-bar .tab, .content-area > div[style*="width: 220px"] .tab, .content-area > div[style*="width: 220px"]',
-  // Dynamic completion: vertical layout active OR event-based completion (tab reordering)
-  isComplete: () => !!document.querySelector('.tab-sidebar, .vertical-tabs, [data-tab-layout="vertical"], .content-area > div[style*="width: 220px"]'),
-  requireAction: true, // user must drag a tab to reorder OR enable vertical tabs through settings
+    title: 'Manage & Reorganize Tabs',
+    description: 'Open, close, and reorder tabs. To enable vertical tabs, right-click any tab and select "Enable vertical tabs" from the menu.',
+    // Highlight horizontal tab at first, then vertical tab after layout change
+    dynamicSelector: () => {
+      // If vertical tabs are enabled, highlight the first vertical tab only
+      const verticalTab = document.querySelector('.tab-sidebar .tab, .vertical-tabs .tab, [data-tab-layout="vertical"] .tab, .content-area .sidebar .tab');
+      if (verticalTab) return verticalTab;
+      // Otherwise, highlight the first horizontal tab only
+      return document.querySelector('.tab-bar .tab.active') || document.querySelector('.tab-bar .tab');
+    },
+    // Completion: vertical layout active only (robust selector)
+    isComplete: () => !!document.querySelector('.tab-sidebar, .vertical-tabs, [data-tab-layout="vertical"], .content-area .sidebar'),
+    requireAction: true, // user must enable vertical tabs through context menu
   },
   {
     id: 'search',

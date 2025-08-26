@@ -43,6 +43,37 @@ const BrowserInterface = ({
     return nextTabIdRef.current;
   };
 
+  // --- Vertical Sidebar State (always initialized, only rendered if needed) ---
+  const [sidebarWidth, setSidebarWidth] = useState(180);
+  const sidebarRef = useRef();
+  const isResizing = useRef(false);
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    // eslint-disable-next-line
+  }, []);
+  const onMouseMove = (e) => {
+    if (!isResizing.current) return;
+    const rect = sidebarRef.current.getBoundingClientRect();
+    const newWidth = Math.max(120, Math.min(320, e.clientX - rect.left));
+    setSidebarWidth(newWidth);
+  };
+  const onMouseUp = () => {
+    isResizing.current = false;
+    document.body.style.cursor = '';
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+  };
+  const startResizing = (e) => {
+    isResizing.current = true;
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -647,7 +678,7 @@ const BrowserInterface = ({
         onShowHistory={() => setShowHistory(true)}
     onShowDownloads={() => setShowDownloads(true)}
     onOpenFind={() => openFindFunction && openFindFunction()}
-  onOpenSettings={() => { try { window.electronAPI?.openSettingsWindow?.(); } catch {} }}
+  onOpenSettings={() => setShowSettings(true)}
   progress={pageProgress}
   onToggleReader={() => {
     try { navFnsRef.current?.toggleReader && navFnsRef.current.toggleReader(); } catch {}
@@ -731,70 +762,35 @@ const BrowserInterface = ({
     {/* Web Content Area + optional vertical tabs */}
       <div className="content-area" style={{ display: 'flex' }}>
         {(settings?.tabsLayout || 'top') === 'vertical-left' && (
-          (() => {
-            const [sidebarWidth, setSidebarWidth] = useState(180);
-            const sidebarRef = useRef();
-            const isResizing = useRef(false);
-
-            useEffect(() => {
-              return () => {
-                document.body.style.cursor = '';
-                window.removeEventListener('mousemove', onMouseMove);
-                window.removeEventListener('mouseup', onMouseUp);
-              };
-            }, []);
-
-            const onMouseMove = (e) => {
-              if (!isResizing.current) return;
-              const rect = sidebarRef.current.getBoundingClientRect();
-              const newWidth = Math.max(120, Math.min(320, e.clientX - rect.left));
-              setSidebarWidth(newWidth);
-            };
-            const onMouseUp = () => {
-              isResizing.current = false;
-              document.body.style.cursor = '';
-              window.removeEventListener('mousemove', onMouseMove);
-              window.removeEventListener('mouseup', onMouseUp);
-            };
-            const startResizing = (e) => {
-              isResizing.current = true;
-              document.body.style.cursor = 'col-resize';
-              window.addEventListener('mousemove', onMouseMove);
-              window.addEventListener('mouseup', onMouseUp);
-            };
-
-            return (
-              <div ref={sidebarRef} className="sidebar" style={{ width: sidebarWidth, borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: 6, position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', marginBottom: 6 }}>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>Tabs</div>
-                  <button className="new-tab-button" onClick={handleNewTab}>+</button>
+          <div ref={sidebarRef} className="sidebar" style={{ width: sidebarWidth, borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: 6, position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 6px', marginBottom: 6 }}>
+              <div style={{ fontSize: 12, color: '#64748b' }}>Tabs</div>
+              <button className="new-tab-button" onClick={handleNewTab}>+</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflow: 'auto' }}>
+              {displayTabs.map((tab, idx) => (
+                <div
+                  key={tab.id}
+                  className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''} ${draggedTabId === tab.id ? 'dragging' : ''}`}
+                  onClick={() => handleSwitchTab(tab.id)}
+                  onContextMenu={(e) => { e.preventDefault(); setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id }); }}
+                  draggable
+                  onDragStart={handleTabDragStart(idx)}
+                  onDragEnd={handleTabDragEnd}
+                  onDragOver={handleTabDragOver(idx)}
+                  onDrop={handleTabDrop(idx)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid var(--border)' : '1px solid transparent', background: tab.active ? 'color-mix(in srgb, var(--panel) 94%, var(--bg))' : 'transparent' }}
+                >
+                  {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3 }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{tab.title}</span>
+                  {!tab.pinned && (
+                    <button className="tab-close" onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}>×</button>
+                  )}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflow: 'auto' }}>
-                  {displayTabs.map((tab, idx) => (
-                    <div
-                      key={tab.id}
-                      className={`tab ${tab.active ? 'active' : ''} ${tab.pinned ? 'pinned' : ''} ${draggedTabId === tab.id ? 'dragging' : ''}`}
-                      onClick={() => handleSwitchTab(tab.id)}
-                      onContextMenu={(e) => { e.preventDefault(); setTabMenu({ open: true, x: e.clientX, y: e.clientY, tabId: tab.id }); }}
-                      draggable
-                      onDragStart={handleTabDragStart(idx)}
-                      onDragEnd={handleTabDragEnd}
-                      onDragOver={handleTabDragOver(idx)}
-                      onDrop={handleTabDrop(idx)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', border: tab.active ? '1px solid var(--border)' : '1px solid transparent', background: tab.active ? 'color-mix(in srgb, var(--panel) 94%, var(--bg))' : 'transparent' }}
-                    >
-                      {tab.favicon && <img src={tab.favicon} alt="" style={{ width: 14, height: 14, borderRadius: 3 }} />}
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{tab.title}</span>
-                      {!tab.pinned && (
-                        <button className="tab-close" onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}>×</button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="sidebar-resizer" onMouseDown={startResizing} />
-              </div>
-            );
-          })()
+              ))}
+            </div>
+            <div className="sidebar-resizer" onMouseDown={startResizing} />
+          </div>
         )}
         <WebView
           url={currentUrl}
@@ -840,7 +836,7 @@ const BrowserInterface = ({
           onShowHistory={() => setShowHistory(true)}
           onShowDownloads={() => setShowDownloads(true)}
           onOpenFind={() => openFindFunction && openFindFunction()}
-          onOpenSettings={() => { try { window.electronAPI?.openSettingsWindow?.(); } catch {} }}
+          onOpenSettings={() => setShowSettings(true)}
           progress={pageProgress}
         />
       )}
@@ -877,7 +873,12 @@ const BrowserInterface = ({
         onClose={() => setShowDownloads(false)}
       />
 
-  {/* Settings now opens in a separate window */}
+  {/* Settings Panel (in-app modal) */}
+  <SettingsPanel
+    isOpen={showSettings}
+    onClose={() => setShowSettings(false)}
+    onApply={setSettings}
+  />
 
       {/* Tab Context Menu */}
       {tabMenu.open && (

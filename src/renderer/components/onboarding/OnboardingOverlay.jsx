@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOnboarding } from './OnboardingProvider';
 import styled, { keyframes } from 'styled-components';
+import './onboarding.css';
 
 const fadeIn = keyframes`from{opacity:0}to{opacity:1}`;
 
@@ -27,13 +28,49 @@ const Panel = styled(motion.div)`
 `;
 
 const Title = styled.h3`margin:0;font-size:18px;color:#fff;letter-spacing:-0.01em;`;
-const Controls = styled.div`display:flex;gap:8px;align-items:center;margin-top:4px;`;
-const Btn = styled.button`
-  background:#0ea5e9;border:none;color:#fff;padding:8px 14px;border-radius:10px;font-weight:600;cursor:pointer;position:relative;
-  &[disabled]{opacity:0.4;cursor:not-allowed;filter:grayscale(20%);} 
+const Controls = styled.div`
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  justify-content: flex-start;
+  position: relative;
 `;
-const Ghost = styled.button`background:transparent;border:1px solid rgba(255,255,255,0.15);color:#d2e9ff;padding:7px 12px;border-radius:10px;cursor:pointer;`;
-const Counter = styled.span`margin-left:auto;font-size:11px;color:#9bc6ed;`;
+const Btn = styled.button`
+  background: #0ea5e9;
+  border: none;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  &[disabled] {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(20%);
+  }
+`;
+const Ghost = styled.button`
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #d2e9ff;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+`;
+const Counter = styled.span`
+  position: absolute;
+  top: -38px;
+  right: 0;
+  font-size: 11px;
+  color: #9bc6ed;
+  background: rgba(20,28,36,0.85);
+  padding: 4px 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+`;
 
 const pulse = keyframes`
   0%{box-shadow:0 0 0 0 rgba(14,165,233,0.6);}
@@ -63,7 +100,15 @@ function getPaddedRect(el, pad=10){
 }
 
 export function OnboardingOverlay(){
-  const { active, current, stepIndex, total, next, prev, skip, finish, canAdvance, completedActions } = useOnboarding();
+  // Add onboarding-active-step-[stepid] class to body for CSS targeting
+  const onboardingState = useOnboarding();
+  const { active, current, stepIndex, total, next, prev, skip, finish, canAdvance, completedActions } = onboardingState;
+  useEffect(() => {
+    if (!active || !current?.id) return;
+    const className = `onboarding-active-step-${current.id}`;
+    document.body.classList.add(className);
+    return () => document.body.classList.remove(className);
+  }, [active, current]);
   const [rect,setRect]=useState(null);
   const [target,setTarget] = useState(null);
   const [dynamicDescription,setDynamicDescription] = useState('');
@@ -308,9 +353,9 @@ export function OnboardingOverlay(){
       tabIndex={-1}
     >
       <Title>{current?.title}</Title>
+      <Counter>{stepIndex+1}/{total}</Counter>
       <div>{dynamicDescription}</div>
       <Controls>
-        <Ghost onClick={()=> stepIndex===0 ? skip() : prev()} aria-label={stepIndex===0?'Skip onboarding':'Previous step'}>{stepIndex===0?'Skip':'Back'}</Ghost>
         <Btn
           ref={primaryRef}
           disabled={!isFinal && !canAdvance(stepIndex)}
@@ -318,12 +363,17 @@ export function OnboardingOverlay(){
           aria-label={isFinal?'Finish onboarding':'Next step'}
           aria-disabled={!isFinal && !canAdvance(stepIndex)}
           data-complete={!isFinal && current?.requireAction && completedActions[current.id] ? 'true' : 'false'}
+          style={{ order: 1 }}
         >{isFinal?'Finish':'Next'}
           {!isFinal && current?.requireAction && completedActions[current.id] && (
             <span aria-hidden style={{position:'absolute',right:-10,top:-10,background:'#10b981',color:'#fff',fontSize:10,padding:'4px 6px',borderRadius:14,boxShadow:'0 4px 12px rgba(0,0,0,0.3)'}}>✓</span>
           )}
         </Btn>
-        <Counter>{stepIndex+1}/{total}</Counter>
+        <Ghost
+          onClick={()=> stepIndex===0 ? skip() : prev()}
+          aria-label={stepIndex===0?'Skip onboarding':'Previous step'}
+          style={{ order: 2 }}
+        >{stepIndex===0?'Skip':'Back'}</Ghost>
       </Controls>
       {!isFinal && current?.requireAction && !completedActions[current.id] && (
         <div style={{fontSize:11,color:'#74c7ff',marginTop:4}}>

@@ -15,6 +15,8 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   const [showButtons, setShowButtons] = useState({ bookmarks: true, history: true, downloads: true, find: true, private: true });
   const [theme, setTheme] = useState('system'); // light | dark | system
   const [homeTiles, setHomeTiles] = useState([]); // [{title,url,icon}]
+  const [originalSettings, setOriginalSettings] = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -25,20 +27,39 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
         if (!mounted) return;
         setDefaultSearchEngine(s.defaultSearchEngine || 'google');
         setEnableOnlineSuggestions(s.enableOnlineSuggestions !== false); // default true
-  setShowBookmarksBarDefault(!!s.showBookmarksBarDefault);
-  setReduceMotion(!!s.reduceMotion);
-  setEnableAdBlocker(!!s.enableAdBlocker);
-  setHomeWallpaper(s.homeWallpaper || '');
+        setShowBookmarksBarDefault(!!s.showBookmarksBarDefault);
+        setReduceMotion(!!s.reduceMotion);
+        setEnableAdBlocker(!!s.enableAdBlocker);
+        setHomeWallpaper(s.homeWallpaper || '');
         setNavBarPosition(s.navBarPosition || 'top');
         setTabsLayout(s.tabsLayout || 'top');
-  setTheme(s.theme || 'system');
-  setHomeTiles(Array.isArray(s.homeTiles) ? s.homeTiles : []);
+        setTheme(s.theme || 'system');
+        setHomeTiles(Array.isArray(s.homeTiles) ? s.homeTiles : []);
         setShowButtons({
           bookmarks: s?.toolbarButtons?.bookmarks !== false,
           history: s?.toolbarButtons?.history !== false,
           downloads: s?.toolbarButtons?.downloads !== false,
           find: s?.toolbarButtons?.find !== false,
           private: s?.toolbarButtons?.private !== false,
+        });
+        setOriginalSettings({
+          defaultSearchEngine: s.defaultSearchEngine || 'google',
+          enableOnlineSuggestions: s.enableOnlineSuggestions !== false,
+          showBookmarksBarDefault: !!s.showBookmarksBarDefault,
+          reduceMotion: !!s.reduceMotion,
+          enableAdBlocker: !!s.enableAdBlocker,
+          homeWallpaper: s.homeWallpaper || '',
+          navBarPosition: s.navBarPosition || 'top',
+          tabsLayout: s.tabsLayout || 'top',
+          toolbarButtons: {
+            bookmarks: s?.toolbarButtons?.bookmarks !== false,
+            history: s?.toolbarButtons?.history !== false,
+            downloads: s?.toolbarButtons?.downloads !== false,
+            find: s?.toolbarButtons?.find !== false,
+            private: s?.toolbarButtons?.private !== false,
+          },
+          theme: s.theme || 'system',
+          homeTiles: Array.isArray(s.homeTiles) ? JSON.parse(JSON.stringify(s.homeTiles)) : [],
         });
       } catch {}
       setLoading(false);
@@ -47,24 +68,43 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
   }, [isOpen]);
 
   const handleSave = async () => {
-  const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker, homeWallpaper, navBarPosition, tabsLayout, toolbarButtons: showButtons, theme, homeTiles };
+    const payload = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker, homeWallpaper, navBarPosition, tabsLayout, toolbarButtons: showButtons, theme, homeTiles };
     try {
       const res = await window.electronAPI?.updateSettings?.(payload);
       if (res?.success) {
         onApply?.(res.settings || payload);
+        setOriginalSettings({ ...payload, homeTiles: JSON.parse(JSON.stringify(homeTiles)) });
       }
     } catch {}
     onClose?.();
   };
 
+  // Compare current state to originalSettings
+  const hasUnsavedChanges = () => {
+    if (!originalSettings) return false;
+    const curr = { defaultSearchEngine, enableOnlineSuggestions, showBookmarksBarDefault, reduceMotion, enableAdBlocker, homeWallpaper, navBarPosition, tabsLayout, toolbarButtons: showButtons, theme, homeTiles };
+    // Deep compare
+    return JSON.stringify(curr) !== JSON.stringify(originalSettings);
+  };
+
+  const handleRequestClose = (e) => {
+    if (hasUnsavedChanges()) {
+      setShowConfirm(true);
+    } else {
+      onClose?.();
+    }
+    if (e) e.stopPropagation();
+  };
+
+
   if (!isOpen) return null;
 
   return (
-    <div className="settings-overlay" onMouseDown={onClose}>
+  <div className="settings-overlay" onMouseDown={handleRequestClose}>
       <div className="settings-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h2>Settings</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={handleRequestClose}>✕</button>
         </div>
         {loading ? (
           <div className="settings-body">Loading…</div>
@@ -208,9 +248,20 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
         )}
 
         <div className="settings-footer">
-          <button className="btn secondary" onClick={onClose}>Cancel</button>
+          <button className="btn secondary" onClick={handleRequestClose}>Cancel</button>
           <button className="btn primary" onClick={handleSave}>Save</button>
         </div>
+        {showConfirm && (
+          <div className="settings-confirm-overlay">
+            <div className="settings-confirm-modal">
+              <div style={{marginBottom:12}}>You have unsaved changes. Exit without saving?</div>
+              <div style={{display:'flex',gap:12,justifyContent:'flex-end'}}>
+                <button className="btn secondary" onClick={()=>setShowConfirm(false)}>Stay</button>
+                <button className="btn danger" onClick={()=>{ setShowConfirm(false); onClose?.(); }}>Exit without saving</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

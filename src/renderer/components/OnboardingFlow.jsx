@@ -4,31 +4,49 @@ import styled from 'styled-components';
 
 const Overlay = styled.div`
   position: fixed;
-  inset: 0;
-  background: rgba(6, 7, 10, 0.85); /* opaque backdrop */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 4000;
-  padding: 28px;
-`;
+        <Left style={{ position: 'relative', minHeight: 340 }}>
+          {/* Step indicator at top right */}
+          <div style={{ position: 'absolute', top: 0, right: 0, fontSize: 13, color: '#a6c8ee', fontWeight: 500 }}>
+            {step + 1} / 6
+          </div>
+          <StepTitle>{steps[step].title}</StepTitle>
+          <StepDesc>{steps[step].desc}</StepDesc>
 
-const Card = styled(motion.div)`
-  width: min(980px, 96%);
-  max-width: 1100px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 14px;
-  padding: 28px;
-  color: #e6eef8;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-  display: flex;
-  gap: 20px;
-`;
+          {/* Example settings section with Save button */}
+          {step === 0 && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 12, color: '#95bde8', marginBottom: 8 }}>Privacy</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <BrowserButton onClick={() => { setAdblock(true); try { window.electronAPI?.updateSettings?.({ adBlockEnabled: true }); } catch {} }}>Enable ad blocking</BrowserButton>
+                <Ghost onClick={() => { setAdblock(false); try { window.electronAPI?.updateSettings?.({ adBlockEnabled: false }); } catch {} }}>Turn off</Ghost>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: '#9fbfe9' }}>Ad blocking is on: {adblock ? 'Yes' : 'No'}</div>
+              <div style={{ marginTop: 16 }}>
+                <Btn onClick={() => { window.electronAPI?.updateSettings?.({ adBlockEnabled: adblock }); }}>Save</Btn>
+              </div>
+            </div>
+          )}
 
-const Left = styled.div`
-  width: 320px;
-  min-width: 260px;
+          {/* Layout selection step (replace dropdown with two buttons) */}
+          {step === 3 && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 12, color: '#95bde8', marginBottom: 8 }}>Layout</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn onClick={() => {/* set layout to option 1 */}}>Option 1</Btn>
+                <Btn onClick={() => {/* set layout to option 2 */}}>Option 2</Btn>
+              </div>
+            </div>
+          )}
+
+          {/* Navigation controls at bottom */}
+          <div style={{ position: 'absolute', left: 0, bottom: 0, width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px 8px 8px' }}>
+            <Ghost onClick={() => { try { const s = { onboardingSeen: true }; window.electronAPI?.updateSettings?.(s); } catch {}; onClose(); }}>Skip</Ghost>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Ghost onClick={() => { if (step === 0) { try { window.electronAPI?.updateSettings?.({ onboardingSeen: true }); } catch {} onClose(); } else back(); }}>{step === 0 ? 'Close' : 'Back'}</Ghost>
+              <Btn onClick={() => { if (step === steps.length - 1) { try { window.electronAPI?.updateSettings?.({ onboardingSeen: true }); } catch {} onClose(); } else next(); }}>{step === steps.length - 1 ? 'Done' : 'Next'}</Btn>
+            </div>
+          </div>
+        </Left>
   display: flex;
   flex-direction: column;
   gap: 12px;
