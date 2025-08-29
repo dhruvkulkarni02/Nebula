@@ -934,35 +934,48 @@ function configureSessionSecurity() {
   const BLOCKED_TYPES = new Set(['script', 'image', 'xhr', 'fetch', 'subFrame', 'media', 'beacon', 'ping', 'stylesheet', 'font', 'object', 'other']);
     ses.webRequest.onBeforeRequest((details, callback) => {
       try {
-        // Debug: Log all mainFrame navigations
+        // Unconditionally allow all mainFrame (top-level page) requests before any adblock logic
         if (details.resourceType === 'mainFrame') {
-          console.log(`[DEBUG][onBeforeRequest] mainFrame navigation: ${details.url}`);
+          console.log(`[DEBUG][onBeforeRequest] mainFrame navigation: ${details.url} (ALLOWED)`);
+          // HTTPS upgrade for top-level navigations (best-effort), but skip in dev for localhost
+          try {
+            const u = new URL(details.url);
+            const isLocalhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.endsWith('.local');
+            if (u.protocol === 'http:' && !(isDev && isLocalhost)) {
+              u.protocol = 'https:';
+              return callback({ redirectURL: u.toString() });
+            }
+          } catch {}
+          return callback({});
         }
-        // HTTPS upgrade for top-level navigations (best-effort), but skip in dev for localhost
-        try {
-          const isMain = details.resourceType === 'mainFrame';
-          const u = new URL(details.url);
-          const isLocalhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.endsWith('.local');
-          if (isMain && u.protocol === 'http:' && !(isDev && isLocalhost)) {
-            u.protocol = 'https:';
-            return callback({ redirectURL: u.toString() });
-          }
-        } catch {}
 
-        // Strip common tracking parameters from URLs
-        try {
-          const u = new URL(details.url);
-          const before = u.toString();
-          const TRACK_PARAMS = new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid','mc_cid','mc_eid','ref','igshid','msclkid']);
-          let changed = false;
-          for (const p of Array.from(u.searchParams.keys())) {
-            if (TRACK_PARAMS.has(p)) { u.searchParams.delete(p); changed = true; }
-          }
-          if (changed) {
-            const after = u.toString();
-            if (after !== before) return callback({ redirectURL: after });
-          }
-        } catch {}
+        // Temporarily disable tracking parameter stripping for debugging
+    /*
+    try {
+      const u = new URL(details.url);
+      const before = u.toString();
+      const TRACK_PARAMS = new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid','mc_cid','mc_eid','ref','igshid','msclkid']);
+      let changed = false;
+      for (const p of Array.from(u.searchParams.keys())) {
+        if (TRACK_PARAMS.has(p)) { u.searchParams.delete(p); changed = true; }
+      }
+      if (changed) {
+        const after = u.toString();
+        if (after !== before) return callback({ redirectURL: after });
+      }
+    } catch {}
+    */
+
+        // Temporarily disable heuristic blocking for debugging
+    /*
+    if (details.resourceType !== 'mainFrame' && (shouldBlockUrl(details.url) || isLikelyAdRequest(details))) {
+      adBlockStats.blocked++;
+      console.log(`[AdBlock][blocked] source=heuristic url=${details.url} type=${details.resourceType}`);
+      try { pushBlockedEntry({ source: 'heuristic', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
+      try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
+      return callback({ cancel: true });
+    }
+    */
 
         // Compute a small cache key and short-circuit repeated decisions
         const cacheKey = `${details.url}||${details.resourceType || 'unknown'}`;
@@ -1012,10 +1025,28 @@ function configureSessionSecurity() {
           }
         } catch (e) {}
 
+        // Add github.com and ketakicreates.com to the allowlist
+        const ALLOWED_HOSTS = ['github.com', 'ketakicreates.com'];
+        const reqHost = hostnameFromUrl(details.url);
+        if (reqHost && ALLOWED_HOSTS.some(host => reqHost === host || reqHost.endsWith(`.${host}`))) {
+          adBlockStats.allowed++;
+          console.log(`[AdBlock][allowlist] host=${reqHost} reason=explicit-allowlist url=${details.url}`);
+          try {
+            adDecisionCache.set(cacheKey, { action: 'allow' });
+            if (adDecisionCache.size > AD_CACHE_MAX) {
+              const k = adDecisionCache.keys().next().value;
+              adDecisionCache.delete(k);
+            }
+          } catch (e) {}
+          return callback({});
+        }
+
         // If the maintained blocker is available, consult it first (without letting it register its own network listeners)
         try {
           if (blockerInstance && typeof blockerInstance.match === 'function') {
             try {
+              // Never block mainFrame (top-level page) requests, even if they match ad/tracker patterns
+              if (details.resourceType === 'mainFrame') return callback({});
               const adblock = require('@cliqz/adblocker');
               const req = adblock.Request.fromRawDetails({
                 _originalRequestDetails: details,
@@ -1028,16 +1059,14 @@ function configureSessionSecurity() {
               if (blockerInstance.config && blockerInstance.config.guessRequestTypeFromUrl) try { req.guessTypeOfRequest(); } catch {}
               const { redirect, match } = blockerInstance.match(req);
               if (redirect) {
-                adBlockStats.blocked++;
-                console.log(`[AdBlock][blocked] source=electron-blocker reason=redirect url=${details.url} type=${details.resourceType}`);
                 // Prevent unsafe redirects (e.g., to data: URLs, file: URLs) for ALL resource types
                 if (redirect.dataUrl && (!redirect.dataUrl.startsWith('http://') && !redirect.dataUrl.startsWith('https://'))) {
                   console.log(`[DEBUG][onBeforeRequest] BLOCKED unsafe redirect to: ${redirect.dataUrl} for type: ${details.resourceType} (allowing original request)`);
+                  adBlockStats.allowed++;
                   return callback({}); // Allow original request, do not redirect
                 }
-                if (details.resourceType === 'mainFrame') {
-                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (redirect): ${details.url}`);
-                }
+                adBlockStats.blocked++;
+                console.log(`[AdBlock][blocked] source=electron-blocker reason=redirect url=${details.url} type=${details.resourceType}`);
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'redirect', url: details.url, type: details.resourceType, redirect: !!redirect.dataUrl, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
                 try { adDecisionCache.set(cacheKey, { action: 'redirect', redirectURL: redirect.dataUrl }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ redirectURL: redirect.dataUrl });
@@ -1045,15 +1074,9 @@ function configureSessionSecurity() {
               if (match) {
                 adBlockStats.blocked++;
                 console.log(`[AdBlock][blocked] source=electron-blocker url=${details.url} type=${details.resourceType}`);
-                if (details.resourceType === 'mainFrame') {
-                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (match): ${details.url}`);
-                }
                 try { pushBlockedEntry({ source: 'electron-blocker', reason: 'match', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
                 try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
                 return callback({ cancel: true });
-                if (details.resourceType === 'mainFrame') {
-                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (local-host-suffix): ${details.url}`);
-                }
               }
             } catch (e) {
               // If any adblock evaluation error occurs, fall through to local heuristics
@@ -1065,6 +1088,8 @@ function configureSessionSecurity() {
         // Local parser fallback
         try {
           if (filterEngine) {
+            // Never block mainFrame (top-level page) requests, even if they match ad/tracker patterns
+            if (details.resourceType === 'mainFrame') return callback({});
             const urlLower = details.url.toLowerCase();
             const u = (() => { try { return new URL(details.url); } catch { return null; } })();
             const host = u && u.hostname ? u.hostname.toLowerCase() : '';
@@ -1080,20 +1105,15 @@ function configureSessionSecurity() {
               for (const sub of (filterEngine.substrings || [])) { try { if (!sub) continue; if (urlLower.includes(sub)) { matched = true; break; } } catch {} }
               if (!matched) { for (const re of (filterEngine.regexes || [])) try { if (re.test(details.url)) { matched = true; break; } } catch {} }
               if (matched) { adBlockStats.blocked++; console.log(`[AdBlock][blocked] source=local-parser url=${details.url}`); try { pushBlockedEntry({ source: 'local-parser', url: details.url, type: details.resourceType, reqHost: host }); } catch (e) {} try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {} return callback({ cancel: true }); }
-                if (details.resourceType === 'mainFrame') {
-                  console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (local-parser): ${details.url}`);
-                }
             }
           }
         } catch (e) {}
 
         // Heuristic fallback
-        if (shouldBlockUrl(details.url) || isLikelyAdRequest(details)) {
+        // Never block mainFrame (top-level page) requests, even if they match ad/tracker patterns
+        if (details.resourceType !== 'mainFrame' && (shouldBlockUrl(details.url) || isLikelyAdRequest(details))) {
           adBlockStats.blocked++;
           console.log(`[AdBlock][blocked] source=heuristic url=${details.url} type=${details.resourceType}`);
-          if (details.resourceType === 'mainFrame') {
-            console.log(`[DEBUG][onBeforeRequest] mainFrame BLOCKED (heuristic): ${details.url}`);
-          }
           try { pushBlockedEntry({ source: 'heuristic', url: details.url, type: details.resourceType, reqHost: hostnameFromUrl(details.url) }); } catch (e) {}
           try { adDecisionCache.set(cacheKey, { action: 'cancel' }); if (adDecisionCache.size > AD_CACHE_MAX) { const k = adDecisionCache.keys().next().value; adDecisionCache.delete(k); } } catch (e) {}
           return callback({ cancel: true });

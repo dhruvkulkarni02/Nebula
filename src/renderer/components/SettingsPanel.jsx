@@ -147,8 +147,10 @@ const SettingsPanel = ({ isOpen, onClose, onApply }) => {
                     </select>
                   </div>
                   <div className="setting-item">
-                    <label className="setting-label">Reduce motion</label>
-                    <input type="checkbox" checked={reduceMotion} onChange={e => { const next = e.target.checked; setReduceMotion(next); try { document.documentElement.setAttribute('data-reduce-motion', next ? 'true' : 'false'); } catch {} }} />
+                    <label className="setting-check">
+                      <input type="checkbox" checked={reduceMotion} onChange={e => { const next = e.target.checked; setReduceMotion(next); try { document.documentElement.setAttribute('data-reduce-motion', next ? 'true' : 'false'); } catch {} }} />
+                      Reduce motion
+                    </label>
                   </div>
                 </>
               )}
